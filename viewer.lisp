@@ -34,12 +34,12 @@
        (format nil "RELAY: ~a" (relay-target node)) xs (+ 30 ys)))))
 
 (defun node-step (node)
-  (when (not (base-station-p node))
+  (node-announce node (new-announce-msg node))
+  (unless (base-station-p node)
     (unless (zerop (hash-table-count (message-buffer node)))
       (let ((msg (hash-pop (message-buffer node))))
-	(unless (duplicate-message? node msg)
-	  (process-ref node msg)
-	  (relay-refreshing-msg node msg))))))
+	(process-ref node msg)
+	(relay-refreshing-msg node msg)))))
 
 (defun render-nodes (nodes)
   (init-topology-refresh *base-station* (new-refreshing-msg *base-station*))
@@ -64,10 +64,18 @@
 	    (setf y (/ (sdl:mouse-y) *scale*))
 	    (render-node node))))))
 
+(defun distance (node1 node2)
+  (with-accessors ((x1 x) (y1 y)) node1
+    (with-accessors ((x2 x) (y2 y)) node2
+      (sqrt (+ (expt (- x1 x2) 2)
+	       (expt (- y1 y2) 2))))))
+
 (defun handle-key (key)
   (case key
     (:sdl-key-q
      (sdl:push-quit-event))
+    (:sdl-key-a
+     (generate-node))
     (:sdl-key-r
      (run))
     (:sdl-key-s
@@ -76,23 +84,26 @@
 (defun viewer ()
   (setf *running* t
       *paused* nil)
-  (sdl:with-init ()
-    (sdl:window *width* *height*)
-    (sdl:initialise-default-font)
-    (setf (sdl:frame-rate) 30)
-    (bootstrap)
-    (sdl:with-events ()
-      (:quit-event () t)
-      (:key-down-event (:key key)
-		       (handle-key key))
-      (:mouse-motion-event (:state s :x-rel dx :y-rel dy :x x :y y)
-			   (drag s x y))
-      (:idle ()
-	     (sdl:clear-display sdl:*black*)
-	     (when (sdl:mouse-right-p)
-	       (context-menu))
-	     (let ((connection
-		    (or swank::*emacs-connection* (swank::default-connection))))
-	       (when (and connection (not (eql swank:*communication-style* :spawn)))
-		 (swank::handle-requests connection t)))
-	     (start-simulation)))))
+  (sb-int:with-float-traps-masked (:divide-by-zero :invalid :inexact :underflow :overflow)
+    (sdl:with-init ()
+      (sdl:window *width* *height* :resizable t)
+      (sdl:initialise-default-font)
+      (setf (sdl:frame-rate) 30)
+      (bootstrap)
+      (sdl:with-events ()
+	(:quit-event () t)
+	(:key-down-event (:key key)
+			 (handle-key key))
+	(:mouse-motion-event (:state s :x-rel dx :y-rel dy :x x :y y)
+			     (drag s x y))
+	(:video-resize-event (:w w :h h)
+			     (sdl:window w h :resizable t))
+	(:idle ()
+	       (sdl:clear-display sdl:*black*)
+	       (when (sdl:mouse-right-p)
+		 (context-menu))
+	       (let ((connection
+		      (or swank::*emacs-connection* (swank::default-connection))))
+		 (when (and connection (not (eql swank:*communication-style* :spawn)))
+		   (swank::handle-requests connection t)))
+	       (start-simulation))))))

@@ -9,5 +9,6 @@
 	       #:lispbuilder-sdl
 	       #:ironclad)
   :components ((:file "package")
+	       (:file "class")
 	       (:file "chopin-routing")
 	       (:file "viewer")))
