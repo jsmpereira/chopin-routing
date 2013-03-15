@@ -19,11 +19,11 @@
   (sdl:update-display))
 
 (defun render-node (node)
-  (with-slots (signal-strength x y base-station-p address color refreshing-number) node
+  (with-slots (group-id signal-strength x y base-station-p address color refreshing-number) node
     (let ((xs (* x *scale*))
 	  (ys (* y *scale*)))
       (sdl:draw-circle (sdl:point :x xs :y ys) *radius*)
-      (sdl:draw-string-solid-* (format nil "ID: ~a (~a, ~a) signal: ~a RN: ~a" address x y signal-strength refreshing-number) xs ys)
+      (sdl:draw-string-solid-* (format nil "ID: ~a GROUP: ~a COORDS: (~a, ~a) signal: ~a RN: ~a" address group-id x y signal-strength refreshing-number) xs ys)
       (sdl:draw-circle (sdl:point :x xs :y ys) (* *scale* signal-strength) :color (if base-station-p sdl:*yellow* color))
       (sdl:draw-string-solid-* (write-to-string address) xs (- 10 ys))
       (sdl:draw-string-solid-*

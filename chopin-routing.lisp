@@ -4,7 +4,7 @@
 
 (defparameter *base-station* nil)
 (defparameter *nodes* nil)
-(defparameter *message-types* '(:ref "REF" :rreq "RREQ" :na "Node Announce"))
+(defparameter *message-types* '(:ref "REF" :rreq "RREQ" :na "Node Announce" :ga "Group Announce"))
 (defparameter *ref-period* 1200 "Topology Refreshing Period - ms")
 (defun nodes () *nodes*)
 
@@ -159,6 +159,22 @@ Nodes relay to base station."
 						:hop-count (1+ hop-count) :rn message-rn) rt))))))
 	ref-message))))
 
+;;; Group logic
+
+(defun new-group-msg (node)
+  "Group announce message"
+  (with-slots (address refreshing-number group-id) node
+    (make-instance 'group-message :msg-type (getf *message-types* :na)
+		   :origin address
+		   :hop-count 0
+		   :group-id group-id
+		   :rn (incf refreshing-number))))
+
+(defun group-members (node)
+  "Node neighbours belonging to same group as node"
+  (with-slots (group-id) node
+    (remove-if-not #'(lambda (n) (= (group-id n) group-id)) (neighbours node))))
+
 ;;; Utils
 
 (defun hash-pop (hashtable)
@@ -175,7 +191,8 @@ Nodes relay to base station."
   (make-instance 'node
 		 :signal-strength 5
 		 :x (+ (random 10) 3)
-		 :y (+ (random 10) 3)))
+		 :y (+ (random 10) 3)
+		 :group-id (random 2)))
 
 (defun bootstrap ()
   (let ((sig-strength 5))
@@ -183,6 +200,7 @@ Nodes relay to base station."
     (setf *base-station* (make-instance 'node :signal-strength sig-strength
 					:x (+ (random 15) 3)
 					:y (+ (random 15) 3)
+					:group-id -1
 					:base-station-p t))
     (loop repeat 3 do
 	    (generate-node))))

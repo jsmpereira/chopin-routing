@@ -20,7 +20,7 @@
     (with-slots (bs-id next-hop hop-count rn) object
       (format stream "bs-id: ~d next-hop: ~d hop-count: ~d :rn ~d" bs-id next-hop hop-count rn))))
 
-;; Announce Message class definition
+;; Node Announce Message class definition
 (defclass announce-message ()
   ((msg-type :initarg :msg-type
 	    :accessor msg-type)
@@ -37,6 +37,24 @@
   (print-unreadable-object (object stream :type t)
     (with-slots (msg-type origin hop-count path rn) object
       (format stream "msg-type: ~a origin: ~a hop-count: ~a path: ~a rn: ~a" msg-type origin hop-count path rn))))
+
+;; Group Announce Message class definition
+(defclass group-message ()
+  ((msg-type :initarg :msg-type
+	     :accessor msg-type)
+   (origin :initarg :origin
+	   :accessor origin)
+   (hop-count :initarg :hop-count
+	      :accessor hop-count)
+   (group-id :initarg :group-id
+	     :accessor group-id)
+   (rn :initarg :rn
+       :accessor rn)))
+
+(defmethod print-object ((object group-message) stream)
+  (print-unreadable-object (object stream :type t)
+    (with-slots (msg-type origin hop-count group-id rn) object
+      (format stream "msg-type: ~a origin: ~a hop-count: ~a group-id: ~a rn: ~a" msg-type origin hop-count group-id rn))))
 
 ;; Refreshing Message class definition
 (defclass refreshing-message ()
@@ -73,6 +91,9 @@
   ((address :initarg :address
 	    :accessor address
 	    :documentation "Node Address")
+   (group-id :initarg :group-id
+	     :accessor group-id
+	     :documentation "Group ID the node belongs to")
    (routing-table :initarg :routing-table
 		  :accessor routing-table
 		  :documentation "This node's routing table")
@@ -119,7 +140,7 @@
 
 (defmethod print-object ((object node) stream)
   (print-unreadable-object (object stream :type t)
-    (with-slots (signal-strength x y base-station-p address refreshing-number broadcast-id routing-table) object
-      (format stream "UID: ~d BS: ~d :signal ~d :pos (~d,~d) :rn ~d :bid ~d :RT ~a" address base-station-p signal-strength x y refreshing-number broadcast-id routing-table))))
+    (with-slots (signal-strength x y base-station-p address refreshing-number broadcast-id routing-table group-id) object
+      (format stream "UID: ~d Group: ~a BS: ~d :signal ~d :pos (~d,~d) :rn ~d :bid ~d :RT ~a" address group-id base-station-p signal-strength x y refreshing-number broadcast-id routing-table))))
 
 
