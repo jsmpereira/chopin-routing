@@ -12,6 +12,7 @@
 (defparameter *radius* 10)
 
 (defun start-simulation ()
+  (display-info)
   (loop for node across (nodes) do
 	(if (not (base-station-p node))
 	    (setf (color node) sdl:*red*)))
@@ -47,6 +48,9 @@
 	(when (neighbours node)
 	  (node-step node))
 	(render-node node)))
+
+(defun display-info ()
+  (sdl:draw-string-solid-* (format nil "Connectivity: ~A" (connectivity)) 0 0))
       
 (defun context-menu ()
   (loop for node across (nodes) do 
