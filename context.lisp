@@ -6,15 +6,15 @@
 
 ;; Adjacency Matrix 
 (defun build-matrix ()
-  (let* ((n-nodes (length (nodes))))
-    (lisplab:dnew 0 n-nodes n-nodes)))
+  (let ((n-nodes (length (nodes))))
+    (matlisp:make-float-matrix n-nodes n-nodes)))
 
 (defparameter *adj-matrix* nil)
 (defparameter *diag-matrix* nil)
 
 (defmacro with-matrix (matrix &body body)
-  `(loop for i below (first (lisplab:dim ,matrix)) do 
-	 (loop for j below (nth 1 (lisplab:dim ,matrix))
+  `(loop for i below (first (matlisp:size ,matrix)) do 
+	 (loop for j below (nth 1 (matlisp:size ,matrix))
 	      ,@body)))
 
 (defun adj-matrix (adj-matrix)
@@ -22,27 +22,24 @@
     (let ((node (node-by-id i)))
       (loop for neighbour across (neighbours node)
 	    when (= (address neighbour) j) do
-	    (setf (lisplab:mref adj-matrix j i) 1.0d0)))))
+	    (setf (matlisp:matrix-ref adj-matrix j i) 1.0f0)))))
 
 (defun vector-sum (adj-matrix)
-  (loop for i below (first (lisplab:dim adj-matrix))
-	collect (lisplab:msum (lisplab:view-col adj-matrix i))))
+  (matlisp:sum adj-matrix))
 
 (defun diag-from-vector-sum (diag-matrix vector-sum)
-  (with-matrix diag-matrix do
-	       (when (= i j)
-		 (setf (lisplab:mref diag-matrix i j) (nth i vector-sum)))))
+  (setf *diag-matrix* (matlisp:diag vector-sum)))
 
 (defun laplacian-matrix (adj-matrix diag-matrix)
-  (lisplab:.- diag-matrix adj-matrix))
+  (matlisp:m- diag-matrix adj-matrix))
 
 (defun fiedler-value ()
-  "We want the second eigen value."
+  "We want the second (last?) eigen value."
   (setf *adj-matrix* (build-matrix))
-  (setf *diag-matrix* (build-matrix))
   (adj-matrix *adj-matrix*)
   (diag-from-vector-sum *diag-matrix* (vector-sum *adj-matrix*))
-  (lisplab:mref (first (lisplab::dgeev (laplacian-matrix *adj-matrix* *diag-matrix*) nil nil)) 1 0))
+  (let ((eigenvalues (matlisp:eig (laplacian-matrix *adj-matrix* *diag-matrix*))))
+    (values (matlisp:mref eigenvalues 3) eigenvalues)))
 
 (defun connectivity ()
   (/ (fiedler-value) (length (nodes))))

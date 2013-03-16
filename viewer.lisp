@@ -50,7 +50,7 @@
 	(render-node node)))
 
 (defun display-info ()
-  (sdl:draw-string-solid-* (format nil "Connectivity: ~A" (connectivity)) 0 0))
+  (sdl:draw-string-solid-* (format nil "Connectivity: ~A" (connectivity)) 0 (- (aref (sdl:video-dimensions) 1) 10)))
       
 (defun context-menu ()
   (loop for node across (nodes) do 
