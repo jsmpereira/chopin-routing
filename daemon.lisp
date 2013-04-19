@@ -202,7 +202,8 @@
 (defun process-message (pkt-header msg-header tlv)
   (with-accessors ((msg-type msg-type) (orig-addr msg-orig-addr) (seq-num msg-seq-num)) msg-header
     (setf (gethash (message-hash msg-type orig-addr seq-num) *duplicate-set*)
-	  (make-instance 'duplicate-tuple :orig-addr orig-addr :seq-num seq-num :exp-time 30))))
+	  (make-instance 'duplicate-tuple :orig-addr orig-addr :seq-num seq-num :exp-time 30))
+    (format nil "msg-type: ~A orig-addr: ~A seq-num: ~A" msg-type orig-addr seq-num)))
 
 (defun retrieve-message ()
   "Unserialize the message and check if it should be processed."
