@@ -5,112 +5,220 @@
 (defparameter *this-node* nil)
 (defparameter *socket* nil)
 
-(defun init-node ()
-  (setf *this-node* (make-instance 'node :address "193.136.230.85"
-		       :group-id 0 :signal-strength 5)))
+(defparameter *msg-seq-num* 0)
+(defparameter *pkt-seq-num* 0)
+(defparameter *msg-hop-limit* 255)
 
-(defun init-neighbours (neighbours-list)
-  (with-slots (neighbors) *this-node*
-    (dolist (neighbour neighbours-list)
-      (vector-push neighbour neighbors))))
+(defparameter *base-station-p* nil)
+(defparameter *node-address* "10.211.55.2")
+
+(defparameter *msg-type* '(:base-station-beacon 1 :node-beacon 2))
+(defparameter *tlv-type* '(:relay 1 :path 2))
+
+(defparameter *duplicate-set* (make-hash-table :test 'equal))
+
+(defclass duplicate-tuple ()
+  ((orig_addr :initarg :orig-addr :accessor orig_addr)
+   (seq-num :initarg :seq-num :accessor seq-num)
+   (exp_time :initarg :exp-time :accessor exp_time)))
+
+(defmethod initialize-instance :after ((duplicate-tuple dt) &key)
+  (setf (gethash  )))
 
 (defun icmp (target)
   (sb-ext:run-program "/sbin/ping" `("-c 1" ,target) :output *standard-output*))
 
-(defun send-message (target &key (port 1234))
-  (setf *socket* (usocket:socket-connect target port :protocol :datagram))
-  (let ((buf (userial:make-buffer)))
-    (userial:with-buffer buf
-      (userial:serialize-slots* (new-announce-msg *this-node*)
-				:string msg-type
-				:uint8 origin
-				:uint8 group-id
-				:uint8 hop-count
-				:uint8 rn)
-      (usocket:socket-send *socket* buf (length buf)))))
-
-(defun receive-message ()
-  (usocket:wait-for-input *socket*))
-
 (defclass packet ()
-  ((length :initarg :length
-	   :accessor packet-length
-	   :type '(unsigned-byte 16))
-   (sequence-number :initarg :seq-num
-		    :accessor seq-num
-		    :type '(unsigned-byte 16))
-   (message-type :initarg :msg-type
-		 :accessor msg-type
-		 :type '(unsigned-byte 8))
-   (vtime :initarg :vtime
-	  :accessor vtime
-	  :type '(unsigned-byte 8))
-   (message-size :initarg :msg-size
-		 :accessor msg-size
-		 :type '(unsigned-byte 8))
-   (originator :initarg :originator
-	       :accessor originator
-	       :type '(unsigned-byte 32))
-   (ttl :initarg :ttl
-	:accessor ttl
-	:type '(unsigned-byte 8))
-   (hop-count :initarg :hop-count
-	      :accessor hop-count
+  ((pkt-header :initarg :pkt-header)
+   (message :initarg :message)))
+
+(defclass pkt-header ()
+  ((version :initarg :version
+	   :accessor version
+	   :type '(unsigned-byte 4))
+   (pkt-flags :initarg :pkt-flags
+	      :accessor pkt-flags
+	      :type '(unsigned-byte 4))
+   (pkt-seq-num :initarg :pkt-seq-num
+		:accessor pkt-seq-num
+		:type '(unsigned-byte 16))) ; end pkt-header
+  (:default-initargs
+   :version 0
+   :pkt-flags #b1000
+   :pkt-seq-num *pkt-seq-num*))
+
+(defclass message ()
+  ((msg-header :initarg :msg-header)
+   (tlv-block :initarg :tlv-block)))
+
+(defclass msg-header ()
+  ((msg-type :initarg :msg-type
+	     :accessor msg-type
+	     :type '(unsigned-byte 8))
+   (msg-flags :initarg :msg-flags
+	      :accessor msg-flags
+	      :type '(unsigned-byte 4))
+   (msg-addr-length :initarg :msg-addr-length
+		    :accessor msg-addr-length
+		    :type '(unsigned-byte 4))
+   (msg-size :initarg :msg-size
+	     :accessor msg-size
+	     :type '(unsigned-byte 16))
+   (msg-orig-addr :initarg :msg-orig-addr
+		  :accessor msg-orig-addr
+		  :type '(unsigned-byte 32))
+   (msg-hop-limit :initarg :msg-hop-limit
+		  :accessor msg-hop-limit
+		  :type '(unsigned-byte 8))
+   (msg-hop-count :initarg :msg-hop-count
+		  :accessor msg-hop-count
+		  :type '(unsigned-byte 8))
+   (msg-seq-num :initarg :msg-seq-num
+		:accessor msg-seq-num
+		:type '(unsigned-byte 16)))
+  (:default-initargs
+   :msg-flags #b1111
+   :msg-addr-length #b0011
+   :msg-size 0
+   :msg-orig-addr (usocket:host-byte-order *node-address*)
+   :msg-hop-limit *msg-hop-limit*
+   :msg-hop-count 0
+   :msg-seq-num *msg-seq-num*))
+
+(defclass tlv-block ()
+  ((tlv :initarg :tlv)))
+
+(defclass tlv ()
+  ((tlv-type :initarg :tlv-type
+	     :accessor tlv-type
+	     :type '(unsigned-byte 8))
+   (tlv-flags :initarg :tlv-flags
+	      :accessor tlv-flags
 	      :type '(unsigned-byte 8))
-   (message-seq-num :initarg :msg-seq-num
-		    :accessor msg-seq-num
-		    :type '(unsigned-byte 16))
-   (message :accessor :message)))
+   (length :initarg :length
+	   :accessor vlength
+	   :type '(unsigned-byte 8))
+   (value :initarg :value
+	  :accessor value
+	  :type '(unsigned-byte 32)))
+  (:default-initargs
+   :tlv-flags #b00010000
+   :length 4 ; for 32-bit address
+   ))
 
-(defun serialize-packet (packet)
-  (userial:make-accessor-serializer (:packet pa packet)
-				    :uint16 packet-length
-				    :uint16 seq-num
-				    :uint8 msg-type
-				    :uint8 vtime
-				    :uint16 msg-size
-				    :uint32 originator
-				    :uint8 ttl
-				    :uint8 hop-count
-				    :uint8 msg-seq-num)
-  (userial:serialize :packet packet))
+;; As per RFC 5444 there are some 4 bit fields. Since they occur in pairs, we encode
+;; them in a unsigned-byte 8.
 
-(defun unserialize-packet (packet)
-  (userial:unserialize :packet :pa packet))
+(defun merge-4bit-fields (a b)
+  (logior (dpb a (byte 4 4) 0)
+          (dpb b (byte 4 0) 0)))
 
-(defun make-packet ()
-  (make-instance 'packet
-		 :length 120
-		 :seq-num 7771
-		 :msg-type 7
-		 :vtime 0
-		 :msg-size 0
-		 :originator (usocket:host-byte-order "10.211.55.2")
-		 :ttl 1
-		 :hop-count 0
-		 :msg-seq-num 1))
+(defun extract-4bit-fields (v)
+  (values (ldb (byte 4 4) v)
+          (ldb (byte 4 0) v)))
 
-(defun build-message ()
-  (serialize-packet (make-packet)))
+(defun version+pkt-flags (pkt-header)
+  (merge-4bit-fields (version pkt-header) (pkt-flags pkt-header)))
 
-(defclass hello ()
-  ((reserved :type '(unsigned-byte 16))
-   (htime :initarg :htime
-	  :accessor htime
-	  :type '(unsigned-byte 8))
-   (willingness :initarg :willing
-		:accessor willing
-		:type '(unsigned-byte 8))
-   (link-code :initarg :lnk-code
-	      :accessor lnk-code
-	      :type '(unsigned-byte 8))
-   (reserved2 :type '(unsigned-byte 8))
-   (link-message-size :initarg :lnk-msg-size
-		      :accessor lnk-msg-size)
-   (neighbor-if-address :initarg :neigh-if-addr
-			:accessor neigh-if-addr
-			:type '(unsigned-byte 32))))
+(defun (setf version+pkt-flags) (value pkt-header)
+  (multiple-value-bind (version flags) (extract-4bit-fields value)
+    (setf (version pkt-header) version
+	  (pkt-flags pkt-header) flags)))
 
+(userial:make-accessor-serializer (:pkt-header ph-instance (make-instance 'pkt-header))
+				  :uint8 version+pkt-flags
+				  :uint16 pkt-seq-num)
+
+(defun serialize-pkt-header (pkt-header)
+  (userial:serialize :pkt-header pkt-header))
+
+(defun unserialize-pkt-header (pkt-header)
+  (userial:unserialize :pkt-header :ph-instance pkt-header))
+
+(defun msg-flags+msg-addr-length (msg-header)
+  (merge-4bit-fields (msg-flags msg-header) (msg-addr-length msg-header)))
+
+(defun (setf msg-flags+msg-addr-length) (value msg-header)
+  (multiple-value-bind (flags length) (extract-4bit-fields value)                  
+    (setf (msg-flags msg-header) flags
+          (msg-addr-length msg-header) length)))
+
+(userial:make-accessor-serializer (:msg-header mh-instance (make-instance 'msg-header))
+				  :uint8 msg-type
+				  :uint8 msg-flags+msg-addr-length
+				  :uint16 msg-size
+				  :uint32 msg-orig-addr
+				  :uint8 msg-hop-limit
+				  :uint8 msg-hop-count
+				  :uint16 msg-seq-num)
+
+(defun serialize-msg-header (msg-header)
+  (userial:serialize :msg-header msg-header))
+
+(defun unserialize-msg-header (msg-header)
+  (userial:unserialize :msg-header :mh-instance msg-header))
+
+(userial:make-accessor-serializer (:tlv tlv-instance (make-instance 'tlv))
+				  :uint8 tlv-type
+				  :uint8 tlv-flags
+				  :uint8 vlength
+				  :uint32 value)
+
+(defun serialize-tlv (tlv)
+  (userial:serialize :tlv tlv))
+
+(defun unserialize-tlv (tlv)
+  (userial:unserialize :tlv :tlv-instance tlv))
+
+(defun make-pkt-header ()
+  (make-instance 'pkt-header :pkt-seq-num (incf *pkt-seq-num*)))
+
+(defun make-msg-header ()
+  (make-instance 'msg-header :msg-type (getf *msg-type* :base-station-beacon)))
+
+(defun make-tlv (value)
+  (make-instance 'tlv :tlv-type (getf *tlv-type* :relay) :value (usocket:host-byte-order value)))
+
+(defun build-message (pkt-header msg-header tlv)
+  (userial:buffer-rewind)
+  (serialize-msg-header msg-header)
+  (serialize-tlv tlv)
+  ;; msg-size is size of message including msg-header, that is msg-header+tlv
+  (setf (msg-size msg-header) (userial:buffer-length))
+  (userial:buffer-rewind)
+  (serialize-pkt-header pkt-header)
+  (serialize-msg-header msg-header)
+  (serialize-tlv tlv))
+
+(defun generate-message ()
+  (build-message (make-instance 'pkt-header :pkt-seq-num (incf *pkt-seq-num*))
+		 (make-instance 'msg-header :msg-type (getf *msg-type* :base-station-beacon) :msg-seq-num (incf *msg-seq-num*) )
+		 (make-instance 'tlv :tlv-type (getf *tlv-type* :relay) :value (usocket:host-byte-order "10.211.55.10"))))
+
+(defun message-hash (msg-type orig-addr seq-num)
+  "Hashing for duplicate set"
+  (ironclad:byte-array-to-hex-string (ironclad:digest-sequence :sha1 (ironclad:ascii-string-to-byte-array (format nil "~a~a~a" msg-type orig-addr seq-num)))))
+
+(defun check-duplicate-set (msg-type orig-addr seq-num)
+  (gethash (message-hash msg-type orig-addr seq-num) *duplicate-set*))
+
+(defun process-message (pkt-header msg-header tlv)
+  (with-accessors ((msg-type msg-type) (orig-addr msg-orig-addr) (seq-num msg-seq-num)) msg-header
+    (setf (gethash (message-hash msg-type orig-addr seq-num) *duplicate-set*)
+	  (make-instance 'duplicate-tuple :orig-addr orig-addr :seq-num seq-num :exp-time 30))))
+
+(defun retrieve-message ()
+  "Unserialize the message and check if it should be processed."
+  (userial:buffer-rewind)
+  (let ((pkt-header (unserialize-pkt-header (make-instance 'pkt-header)))
+	(msg-header (unserialize-msg-header (make-instance 'msg-header)))
+	(tlv (unserialize-tlv (make-instance 'tlv))))
+    (with-accessors ((msg-type msg-type) (orig-addr msg-orig-addr) (seq-num msg-seq-num) (hop-limit msg-hop-limit) (hop-count msg-hop-count)) msg-header
+      (cond
+	((= hop-limit 0) nil) ; discard
+	((= hop-count 255) nil) ; discard
+	((check-duplicate-set msg-type orig-addr seq-num) nil) ; discard
+	(t (process-message pkt-header msg-header tlv))))))
 
 ;; sockets
 
@@ -123,15 +231,6 @@
 
 (defparameter *broadcast-socket* nil)
 (defparameter *broadcast-port* 1234)
-
-(defparameter *out* *standard-output*)
-
-(defun bootstrap ()
-  (let* ((socket (make-instance 'sb-bsd-sockets:inet-socket :type :datagram :protocol :udp))
-	 (usocket (usocket::make-datagram-socket socket)))
-    (setf (usocket:socket-option usocket :broadcast) t)
-    ;(usocket:socket-connect *broadcast-address* *broadcast-port* :protocol :datagram :element-type '(unsigned-byte 8))
-    (setf *broadcast-socket* usocket)))
 
 (defun start-server (port)
   (let ((socket (usocket:socket-connect nil nil :protocol :datagram
@@ -153,17 +252,17 @@
   (loop
    (multiple-value-bind (buffer size host port)
        (usocket:socket-receive socket buffer (length buffer))
-     (unless (not (equal (usocket:vector-quad-to-dotted-quad host) *host-address*))
+     (unless (equal (usocket:vector-quad-to-dotted-quad host) *host-address*)
        (userial:with-buffer buffer
 	 (userial:buffer-rewind)
-	 (let ((read (userial:unserialize :packet)))
+	 (let ((read (retrieve-message)))
 	   (with-open-file (s "/Users/josesantos/received" :direction :output
 			      :if-exists :supersede)
-	     (format s "Received ~A (~A) bytes from ~A:~A --> ~A BUFFER: ~A~%" size (userial:buffer-length) (usocket:vector-quad-to-dotted-quad host) port read (userial:get-buffer)))))))))
+	     (format s "Received ~A (~A) bytes from ~A:~A --> ~A~%" size (userial:buffer-length) host port read))))))))
 
 (defun writer (socket)
   (loop
-   (usocket:socket-send socket (serialize-packet (make-packet)) (userial:buffer-length) :host *broadcast-address* :port *broadcast-port*)
+   (usocket:socket-send socket (generate-message) (userial:buffer-length) :host *broadcast-address* :port *broadcast-port*)
    (userial:buffer-rewind)
    (sleep 5)))
 
