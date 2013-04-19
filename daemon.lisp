@@ -22,9 +22,6 @@
    (seq-num :initarg :seq-num :accessor seq-num)
    (exp_time :initarg :exp-time :accessor exp_time)))
 
-(defmethod initialize-instance :after ((duplicate-tuple dt) &key)
-  (setf (gethash  )))
-
 (defun icmp (target)
   (sb-ext:run-program "/sbin/ping" `("-c 1" ,target) :output *standard-output*))
 
