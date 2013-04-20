@@ -9,12 +9,13 @@
 	       #:ironclad
 	       #:usocket
 	       #:userial
-	       #:bordeaux-threads)
+	       #:bordeaux-threads
+	       #:simple-date-time)
   :components ((:file "package")
 	       (:file "class")
 	       (:file "chopin-routing")
 	       (:file "daemon")
-	       (:file "context")
+	       #+darwin (:file "context")
 	       (:file "viewer")))
 
-(load "/Users/josesantos/quicklisp/local-projects/matlisp-master/build/start.lisp")
+#+darwin (load "/Users/josesantos/quicklisp/local-projects/matlisp-master/build/start.lisp")
