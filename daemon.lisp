@@ -22,7 +22,8 @@
 (defparameter *duplicate-set* (make-hash-table :test 'equal))
 
 (defclass duplicate-tuple ()
-  ((orig_addr :initarg :orig-addr :accessor orig-addr)
+  ((orig-addr :initarg :orig-addr :accessor orig-addr)
+   (msg-type :initarg :msg-type :accessor msg-type)
    (seq-num :initarg :seq-num :accessor seq-num)
    (exp-time :initarg :exp-time :accessor exp-time)))
 
@@ -207,7 +208,7 @@
   (with-accessors ((msg-type msg-type) (orig-addr msg-orig-addr) (seq-num msg-seq-num) (hop-count msg-hop-count) (hop-limit msg-hop-limit)) msg-header
     (incf *messages-received*)
     ;; add message to duplicate set
-    (let ((dtuple (make-instance 'duplicate-tuple :orig-addr orig-addr :seq-num seq-num :exp-time (dt:second+ (dt:now) 10))))
+    (let ((dtuple (make-instance 'duplicate-tuple :orig-addr orig-addr :msg-type msg-type :seq-num seq-num :exp-time (dt:second+ (dt:now) 10))))
       (setf (gethash (message-hash msg-type orig-addr) *duplicate-set*)
 	    dtuple)
       (with-accessors ((tlv-type tlv-type) (value value)) tlv
@@ -289,3 +290,16 @@
 		(let ((cur (shiftf th nil)))
 		  (when (and cur (not (eql th (bt:current-thread))))
 		    (bt:destroy-thread cur)))) threads)))
+
+
+
+;; debug 
+
+(defun print-hash (hash)
+  (loop for k being the hash-keys in hash using (hash-value v)
+	do (format t "K:~A V:~A~%" k v)))
+
+(defmethod print-object ((object duplicate-tuple) stream)
+  (print-unreadable-object (object stream :type t)
+    (with-slots (msg-type orig-addr seq-num exp-time) object
+      (format stream "~A ~A ~A ~A" msg-type (usocket:hbo-to-dotted-quad orig-addr) seq-num exp-time))))
