@@ -8,11 +8,12 @@
 ;; stats
 (defparameter *messages-received* 0)
 
-(defparameter *tc-interval* 5) ; seconds
+(defstruct config host-address broadcast-address port hop-limit refresh-interval dup-hold-time timer-repeat-interval)
+
+(defparameter *config* nil)
 
 (defparameter *msg-seq-num* 0) ; wrap-around is 65535
 (defparameter *pkt-seq-num* 0) ; same here
-(defparameter *msg-hop-limit* 255) ; wrap-around is 255
 
 (defparameter *base-station-p* nil)
 
@@ -82,8 +83,8 @@
    :msg-flags #b1111
    :msg-addr-length #b0011
    :msg-size 0
-   :msg-orig-addr (usocket:host-byte-order *host-address*)
-   :msg-hop-limit *msg-hop-limit*
+   :msg-orig-addr (usocket:host-byte-order (config-host-address *config*))
+   :msg-hop-limit (config-hop-limit *config*)
    :msg-hop-count 0
    :msg-seq-num *msg-seq-num*))
 
@@ -208,7 +209,7 @@
   (with-accessors ((msg-type msg-type) (orig-addr msg-orig-addr) (seq-num msg-seq-num) (hop-count msg-hop-count) (hop-limit msg-hop-limit)) msg-header
     (incf *messages-received*)
     ;; add message to duplicate set
-    (let ((dtuple (make-instance 'duplicate-tuple :orig-addr orig-addr :msg-type msg-type :seq-num seq-num :exp-time (dt:second+ (dt:now) 10))))
+    (let ((dtuple (make-instance 'duplicate-tuple :orig-addr orig-addr :msg-type msg-type :seq-num seq-num :exp-time (dt:second+ (dt:now) (config-dup-hold-time *config*)))))
       (setf (gethash (message-hash msg-type orig-addr) *duplicate-set*)
 	    dtuple)
       (with-accessors ((tlv-type tlv-type) (value value)) tlv
@@ -237,20 +238,15 @@
 
 ;; sockets
 
-(defvar *broadcast-address* "10.211.55.255")
-(defvar *host-address* "10.211.55.2")
-(defvar *server* nil)
-(defvar *server-port* nil)
 (defvar *writer-thread* nil)
 (defvar *reader-thread* nil)
-
 (defparameter *broadcast-socket* nil)
-(defparameter *broadcast-port* 1234)
 
-(defun start-server (port)
+(defun start-server ()
+  (load-config)
   (let ((socket (usocket:socket-connect nil nil :protocol :datagram
 					:local-host usocket:*wildcard-host*
-					:local-port port))
+					:local-port (config-port *config*)))
 	(buffer (make-array 32 :element-type '(unsigned-byte 8) :fill-pointer 0 :adjustable t)))
     (setf (usocket:socket-option socket :broadcast) t)
     (setf *broadcast-socket* socket)
@@ -262,25 +258,25 @@
 					      (unwind-protect
 						   (run-reader socket buffer)
 						(usocket:socket-close socket))) :name "Received Thread"))
-    (sb-ext:schedule-timer (sb-ext:make-timer #'check-duplicate-holding) 10 :repeat-interval 7) :thread t))
+    (sb-ext:schedule-timer (sb-ext:make-timer #'check-duplicate-holding) 10 :repeat-interval (config-timer-repeat-interval *config*)) :thread t))
 
 (defun run-reader (socket buffer)
   (loop
    (multiple-value-bind (buffer size host port)
        (usocket:socket-receive socket buffer (length buffer))
-     (unless (equal (usocket:vector-quad-to-dotted-quad host) *host-address*)
+     (unless (equal (usocket:vector-quad-to-dotted-quad host) (config-host-address *config*))
        (userial:with-buffer buffer
 	 (userial:buffer-rewind)
 	 (let ((read (retrieve-message)))
-	   (with-open-file (s "/Users/josesantos/received" :direction :output
+	   (with-open-file (s (merge-pathnames "received" (user-homedir-pathname)) :direction :output
 			      :if-exists :supersede)
 	     (format s "Received ~A (~A) bytes from ~A:~A --> ~A~%" size (userial:buffer-length) host port read))))))))
 
 (defun writer (socket)
   (loop
-   (usocket:socket-send socket (generate-message) (userial:buffer-length) :host *broadcast-address* :port *broadcast-port*)
+   (usocket:socket-send socket (generate-message) (userial:buffer-length) :host (config-broadcast-address *config*) :port (config-port *config*))
    (userial:buffer-rewind)
-   (sleep *tc-interval*)))
+   (sleep (config-refresh-interval *config*))))
 
 (defun stop-server ()
   (dolist (timer (sb-ext:list-all-timers))
@@ -303,3 +299,11 @@
   (print-unreadable-object (object stream :type t)
     (with-slots (msg-type orig-addr seq-num exp-time) object
       (format stream "~A ~A ~A ~A" msg-type (usocket:hbo-to-dotted-quad orig-addr) seq-num exp-time))))
+
+
+;; util
+
+(defun load-config (&optional (path "quicklisp/local-projects/chopin-routing/.config"))
+  (with-open-file (in (merge-pathnames path (user-homedir-pathname)) :direction :input)
+    (let ((conf (read in)))
+      (setf *config* (apply #'make-config conf)))))
