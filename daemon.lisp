@@ -20,6 +20,8 @@
 (defparameter *msg-types* '(:base-station-beacon 1 :node-beacon 2))
 (defparameter *tlv-types* '(:relay 1 :path 2))
 
+(defparameter *out-buffer* (sb-concurrency:make-queue))
+
 (defparameter *duplicate-set* (make-hash-table :test 'equal))
 
 (defclass duplicate-tuple ()
@@ -32,8 +34,8 @@
   (sb-ext:run-program "/sbin/ping" `("-c 1" ,target) :output *standard-output*))
 
 (defclass packet ()
-  ((pkt-header :initarg :pkt-header)
-   (message :initarg :message)))
+  ((pkt-header :initarg :pkt-header :reader pkt-header)
+   (message :initarg :message :reader message)))
 
 (defclass pkt-header ()
   ((version :initarg :version
@@ -51,8 +53,8 @@
    :pkt-seq-num *pkt-seq-num*))
 
 (defclass message ()
-  ((msg-header :initarg :msg-header)
-   (tlv-block :initarg :tlv-block)))
+  ((msg-header :initarg :msg-header :reader msg-header)
+   (tlv-block :initarg :tlv-block :reader tlv-block)))
 
 (defclass msg-header ()
   ((msg-type :initarg :msg-type
@@ -89,7 +91,7 @@
    :msg-seq-num *msg-seq-num*))
 
 (defclass tlv-block ()
-  ((tlv :initarg :tlv)))
+  ((tlv :initarg :tlv :reader tlv)))
 
 (defclass tlv ()
   ((tlv-type :initarg :tlv-type
@@ -173,6 +175,18 @@
 (defun unserialize-tlv (tlv)
   (userial:unserialize :tlv :tlv-instance tlv))
 
+(defun unserialize-packet (packet)
+  (let ((buffer (userial:make-buffer)))
+    (userial:with-buffer buffer
+      (userial:buffer-rewind)
+      (let ((pkt-header (pkt-header packet))
+	    (msg-header (msg-header (message packet)))
+	    (tlv (tlv (tlv-block (message packet)))))
+	(unserialize-pkt-header pkt-header)
+	(unserialize-msg-header msg-header)
+	(unserialize-tlv tlv)
+	buffer))))
+
 (defun make-pkt-header ()
   (make-instance 'pkt-header :pkt-seq-num (incf *pkt-seq-num*)))
 
@@ -180,23 +194,23 @@
   (make-instance 'msg-header :msg-type (getf *msg-types* :base-station-beacon)))
 
 (defun make-tlv (value)
-  (make-instance 'tlv :tlv-type (getf *tlv-type* :relay) :value (usocket:host-byte-order value)))
+  (make-instance 'tlv :tlv-type (getf *tlv-types* :relay) :value (usocket:host-byte-order value)))
 
-(defun build-message (pkt-header msg-header tlv)
+(defun build-packet (pkt-header msg-header tlv)
   (userial:buffer-rewind)
   (serialize-msg-header msg-header)
   (serialize-tlv tlv)
   ;; msg-size is size of message including msg-header, that is msg-header+tlv
   (setf (msg-size msg-header) (userial:buffer-length))
-  (userial:buffer-rewind)
-  (serialize-pkt-header pkt-header)
-  (serialize-msg-header msg-header)
-  (serialize-tlv tlv))
+  (make-instance 'packet :pkt-header pkt-header :message (make-instance 'message :msg-header msg-header :tlv-block (make-instance 'tlv-block :tlv tlv))))
 
-(defun generate-message ()
-  (build-message (make-instance 'pkt-header :pkt-seq-num (incf *pkt-seq-num*))
-		 (make-instance 'msg-header :msg-type (getf *msg-types* :base-station-beacon) :msg-seq-num (incf *msg-seq-num*) )
-		 (make-instance 'tlv :tlv-type (getf *tlv-types* :relay) :value (usocket:host-byte-order "10.211.55.10"))))
+(defun generate-message (&key pkt-header msg-header tlv (msg-type (getf *msg-types* :base-station-beacon)) (tlv-type (getf *tlv-types* :relay)) (tlv-value (usocket:host-byte-order "10.211.55.10")))
+  (let* ((pkt-header (or pkt-header (make-instance 'pkt-header)))
+	 (msg-header (or msg-header (make-instance 'msg-header :msg-type msg-type)))
+	 (tlv (or tlv (make-instance 'tlv :tlv-type tlv-type :value tlv-value)))
+	 (packet (build-packet pkt-header msg-header tlv)))
+    (sb-concurrency:enqueue packet *out-buffer*)
+    packet))
 
 (defun message-hash (msg-type orig-addr)
   "Hashing for duplicate set"
@@ -210,31 +224,49 @@
     (incf *messages-received*)
     ;; add message to duplicate set
     (let ((dtuple (make-instance 'duplicate-tuple :orig-addr orig-addr :msg-type msg-type :seq-num seq-num :exp-time (dt:second+ (dt:now) (config-dup-hold-time *config*)))))
-      (setf (gethash (message-hash msg-type orig-addr) *duplicate-set*)
-	    dtuple)
+      (setf (gethash (message-hash msg-type orig-addr) *duplicate-set*) dtuple)
+      ;; update message and enqueue
+      (incf hop-count)
+      (decf hop-limit)
+      (sb-concurrency:enqueue (generate-message :pkt-header pkt-header :msg-header msg-header :tlv tlv) *out-buffer*)
       (with-accessors ((tlv-type tlv-type) (value value)) tlv
 	(format nil "~A DUP --> exp-time: ~A | hop-count: ~A msg-type: ~A orig-addr: ~A seq-num: ~A content-type: ~A content: ~A" (dt:now) (slot-value dtuple 'exp-time) hop-count msg-type (usocket:hbo-to-dotted-quad orig-addr) seq-num tlv-type (usocket:hbo-to-dotted-quad value))))))
 
-(defun retrieve-message ()
+(defun retrieve-message (buffer)
   "Unserialize the message and check if it should be processed."
-  (userial:buffer-rewind)
-  (let ((pkt-header (unserialize-pkt-header (make-instance 'pkt-header)))
-	(msg-header (unserialize-msg-header (make-instance 'msg-header)))
-	(tlv (unserialize-tlv (make-instance 'tlv))))
-    (with-accessors ((msg-type msg-type) (orig-addr msg-orig-addr) (seq-num msg-seq-num) (hop-limit msg-hop-limit) (hop-count msg-hop-count)) msg-header
-      (cond
-	((= hop-limit 0) nil) ; discard
-	((= hop-count 255) nil) ; discard
-	((not (member msg-type *msg-types*)) nil) ;discard
-	((check-duplicate-set msg-type orig-addr) (format nil "~A" (dt:now))) ; discard
-	(t (process-message pkt-header msg-header tlv))))))
+  (userial:with-buffer buffer
+    (let ((pkt-header (unserialize-pkt-header (make-instance 'pkt-header)))
+	  (msg-header (unserialize-msg-header (make-instance 'msg-header)))
+	  (tlv (unserialize-tlv (make-instance 'tlv))))
+      (with-accessors ((msg-type msg-type) (orig-addr msg-orig-addr) (seq-num msg-seq-num) (hop-limit msg-hop-limit) (hop-count msg-hop-count)) msg-header
+	(cond
+	  ((= hop-limit 0) nil) ; discard
+	  ((= hop-count 255) nil) ; discard
+	  ((not (member msg-type *msg-types*)) nil) ;discard
+	  ((check-duplicate-set msg-type orig-addr) (format nil "~A" (dt:now))) ; discard
+	  (t (process-message pkt-header msg-header tlv)))))))
 
 ;; timer / event scheduling
 
 (defun check-duplicate-holding ()
+  "Remove *duplicate-set* entries with expired timestamp."
   (loop for key being the hash-keys in *duplicate-set* using (hash-value val)
 	when (dt:time>= (dt:now) (slot-value val 'exp-time))
 	do (remhash key *duplicate-set*)))
+
+(defun out-buffer-get ()
+  (let ((packet (sb-concurrency:dequeue *out-buffer*)))
+    (when packet
+      (unserialize-packet packet))))
+
+(defun start-timers ()
+  "Setup and start timers."
+  (sb-ext:schedule-timer (sb-ext:make-timer #'check-duplicate-holding :thread t) 10 :repeat-interval (config-timer-repeat-interval *config*))
+  (sb-ext:schedule-timer (sb-ext:make-timer #'generate-message :thread t) 5 :repeat-interval (config-refresh-interval *config*)))
+
+(defun stop-timers ()
+  (dolist (timer (sb-ext:list-all-timers))
+    (sb-ext:unschedule-timer timer)))
 
 ;; sockets
 
@@ -246,8 +278,7 @@
   (load-config)
   (let ((socket (usocket:socket-connect nil nil :protocol :datagram
 					:local-host usocket:*wildcard-host*
-					:local-port (config-port *config*)))
-	(buffer (make-array 32 :element-type '(unsigned-byte 8) :fill-pointer 0 :adjustable t)))
+					:local-port (config-port *config*))))
     (setf (usocket:socket-option socket :broadcast) t)
     (setf *broadcast-socket* socket)
     (setf *writer-thread* (bt:make-thread #'(lambda ()
@@ -256,31 +287,33 @@
 						(usocket:socket-close socket))) :name "HELLO Thread"))
     (setf *reader-thread* (bt:make-thread #'(lambda ()
 					      (unwind-protect
-						   (run-reader socket buffer)
+						   (run-reader socket)
 						(usocket:socket-close socket))) :name "Received Thread"))
-    (sb-ext:schedule-timer (sb-ext:make-timer #'check-duplicate-holding) 10 :repeat-interval (config-timer-repeat-interval *config*)) :thread t))
+    (start-timers)))
 
-(defun run-reader (socket buffer)
-  (loop
-   (multiple-value-bind (buffer size host port)
-       (usocket:socket-receive socket buffer (length buffer))
-     (unless (equal (usocket:vector-quad-to-dotted-quad host) (config-host-address *config*))
-       (userial:with-buffer buffer
-	 (userial:buffer-rewind)
-	 (let ((read (retrieve-message)))
-	   (with-open-file (s (merge-pathnames "received" (user-homedir-pathname)) :direction :output
-			      :if-exists :supersede)
-	     (format s "Received ~A (~A) bytes from ~A:~A --> ~A~%" size (userial:buffer-length) host port read))))))))
+(defun run-reader (socket)
+  (let ((buffer (make-array usocket:+max-datagram-packet-size+ :element-type '(unsigned-byte 8) :fill-pointer 0)))
+    (loop
+     (multiple-value-bind (buffer size host port)
+	 (usocket:socket-receive socket buffer (length buffer))
+       (unless (equal (usocket:vector-quad-to-dotted-quad host) (config-host-address *config*))
+	 (userial:with-buffer buffer
+	   (userial:buffer-rewind)
+	   (let ((read (retrieve-message buffer)))
+	     (with-open-file (s (merge-pathnames "received" (user-homedir-pathname)) :direction :output
+				:if-exists :supersede)
+	       (format s "Received ~A (~A) bytes from ~A:~A --> ~A~%" size (userial:buffer-length) host port read)))))))))
 
 (defun writer (socket)
   (loop
-   (usocket:socket-send socket (generate-message) (userial:buffer-length) :host (config-broadcast-address *config*) :port (config-port *config*))
-   (userial:buffer-rewind)
+   (let ((out (out-buffer-get)))
+     (when out
+       (usocket:socket-send socket out (userial:buffer-length) :host (config-broadcast-address *config*) :port (config-port *config*))))
    (sleep (config-refresh-interval *config*))))
 
 (defun stop-server ()
-  (dolist (timer (sb-ext:list-all-timers))
-    (sb-ext:unschedule-timer timer))
+  (setf *out-buffer* (sb-concurrency:make-queue))
+  (stop-timers)
   (let ((threads `(,*writer-thread* ,*reader-thread*)))
     (mapcar #'(lambda (th)
 		(let ((cur (shiftf th nil)))

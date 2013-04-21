@@ -5,7 +5,8 @@
   :description "Describe chopin-routing here"
   :author "Your Name <your.name@example.com>"
   :license "Specify license here"
-  :depends-on (#:lispbuilder-sdl
+  :depends-on (#:sb-concurrency
+	       #:lispbuilder-sdl
 	       #:ironclad
 	       #:usocket
 	       #:userial
