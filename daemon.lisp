@@ -175,16 +175,15 @@
 (defun unserialize-tlv (tlv)
   (userial:unserialize :tlv :tlv-instance tlv))
 
-(defun unserialize-packet (packet)
+(defun serialize-packet (packet)
   (let ((buffer (userial:make-buffer)))
     (userial:with-buffer buffer
-      (userial:buffer-rewind)
       (let ((pkt-header (pkt-header packet))
 	    (msg-header (msg-header (message packet)))
 	    (tlv (tlv (tlv-block (message packet)))))
-	(unserialize-pkt-header pkt-header)
-	(unserialize-msg-header msg-header)
-	(unserialize-tlv tlv)
+	(serialize-pkt-header pkt-header)
+	(serialize-msg-header msg-header)
+	(serialize-tlv tlv)
 	buffer))))
 
 (defun make-pkt-header ()
@@ -197,12 +196,12 @@
   (make-instance 'tlv :tlv-type (getf *tlv-types* :relay) :value (usocket:host-byte-order value)))
 
 (defun build-packet (pkt-header msg-header tlv)
-  (userial:buffer-rewind)
-  (serialize-msg-header msg-header)
-  (serialize-tlv tlv)
-  ;; msg-size is size of message including msg-header, that is msg-header+tlv
-  (setf (msg-size msg-header) (userial:buffer-length))
-  (make-instance 'packet :pkt-header pkt-header :message (make-instance 'message :msg-header msg-header :tlv-block (make-instance 'tlv-block :tlv tlv))))
+  (userial:with-buffer (userial:make-buffer)
+    (serialize-msg-header msg-header)
+    (serialize-tlv tlv)
+    ;; msg-size is size of message including msg-header, that is msg-header+tlv
+    (setf (msg-size msg-header) (userial:buffer-length))
+    (make-instance 'packet :pkt-header pkt-header :message (make-instance 'message :msg-header msg-header :tlv-block (make-instance 'tlv-block :tlv tlv)))))
 
 (defun generate-message (&key pkt-header msg-header tlv (msg-type (getf *msg-types* :base-station-beacon)) (tlv-type (getf *tlv-types* :relay)) (tlv-value (usocket:host-byte-order "10.211.55.10")))
   (let* ((pkt-header (or pkt-header (make-instance 'pkt-header)))
@@ -228,13 +227,14 @@
       ;; update message and enqueue
       (incf hop-count)
       (decf hop-limit)
-      (sb-concurrency:enqueue (generate-message :pkt-header pkt-header :msg-header msg-header :tlv tlv) *out-buffer*)
+      (generate-message :pkt-header pkt-header :msg-header msg-header :tlv tlv)
       (with-accessors ((tlv-type tlv-type) (value value)) tlv
 	(format nil "~A DUP --> exp-time: ~A | hop-count: ~A msg-type: ~A orig-addr: ~A seq-num: ~A content-type: ~A content: ~A" (dt:now) (slot-value dtuple 'exp-time) hop-count msg-type (usocket:hbo-to-dotted-quad orig-addr) seq-num tlv-type (usocket:hbo-to-dotted-quad value))))))
 
 (defun retrieve-message (buffer)
   "Unserialize the message and check if it should be processed."
   (userial:with-buffer buffer
+    (userial:buffer-rewind)
     (let ((pkt-header (unserialize-pkt-header (make-instance 'pkt-header)))
 	  (msg-header (unserialize-msg-header (make-instance 'msg-header)))
 	  (tlv (unserialize-tlv (make-instance 'tlv))))
@@ -255,9 +255,11 @@
 	do (remhash key *duplicate-set*)))
 
 (defun out-buffer-get ()
-  (let ((packet (sb-concurrency:dequeue *out-buffer*)))
-    (when packet
-      (unserialize-packet packet))))
+  (let ((buf (userial:make-buffer)))
+    (userial:with-buffer buf
+      (let ((packet (sb-concurrency:dequeue *out-buffer*)))
+	(when packet
+	  (serialize-packet packet))))))
 
 (defun start-timers ()
   "Setup and start timers."
@@ -284,25 +286,23 @@
     (setf *writer-thread* (bt:make-thread #'(lambda ()
 					      (unwind-protect
 						   (writer socket)
-						(usocket:socket-close socket))) :name "HELLO Thread"))
+						(usocket:socket-close socket))) :name "WRITER Thread"))
     (setf *reader-thread* (bt:make-thread #'(lambda ()
 					      (unwind-protect
 						   (run-reader socket)
-						(usocket:socket-close socket))) :name "Received Thread"))
+						(usocket:socket-close socket))) :name "READER Thread"))
     (start-timers)))
 
 (defun run-reader (socket)
-  (let ((buffer (make-array usocket:+max-datagram-packet-size+ :element-type '(unsigned-byte 8) :fill-pointer 0)))
+  (let ((buffer (make-array 32 :element-type '(unsigned-byte 8) :fill-pointer 0 :adjustable t)))
     (loop
      (multiple-value-bind (buffer size host port)
 	 (usocket:socket-receive socket buffer (length buffer))
        (unless (equal (usocket:vector-quad-to-dotted-quad host) (config-host-address *config*))
-	 (userial:with-buffer buffer
-	   (userial:buffer-rewind)
-	   (let ((read (retrieve-message buffer)))
-	     (with-open-file (s (merge-pathnames "received" (user-homedir-pathname)) :direction :output
-				:if-exists :supersede)
-	       (format s "Received ~A (~A) bytes from ~A:~A --> ~A~%" size (userial:buffer-length) host port read)))))))))
+	 (let ((read (retrieve-message buffer)))
+	   (with-open-file (s (merge-pathnames "received" (user-homedir-pathname)) :direction :output
+			      :if-exists :supersede)
+	     (format s "Received ~A (~A) bytes from ~As:~A --> ~A ~A~%" size (length buffer) host port read buffer))))))))
 
 (defun writer (socket)
   (loop
