@@ -203,9 +203,9 @@
     (setf (msg-size msg-header) (userial:buffer-length))
     (make-instance 'packet :pkt-header pkt-header :message (make-instance 'message :msg-header msg-header :tlv-block (make-instance 'tlv-block :tlv tlv)))))
 
-(defun generate-message (&key pkt-header msg-header tlv (msg-type (getf *msg-types* :base-station-beacon)) (tlv-type (getf *tlv-types* :relay)) (tlv-value (usocket:host-byte-order "10.211.55.10")))
+(defun generate-message (&key pkt-header msg-header tlv (msg-type (getf *msg-types* :base-station-beacon)) (tlv-type (getf *tlv-types* :relay)) (tlv-value (usocket:host-byte-order "7.7.7.7")))
   (let* ((pkt-header (or pkt-header (make-instance 'pkt-header)))
-	 (msg-header (or msg-header (make-instance 'msg-header :msg-type msg-type)))
+	 (msg-header (or msg-header (make-instance 'msg-header :msg-type msg-type :msg-seq-num (incf *msg-seq-num*))))
 	 (tlv (or tlv (make-instance 'tlv :tlv-type tlv-type :value tlv-value)))
 	 (packet (build-packet pkt-header msg-header tlv)))
     (sb-concurrency:enqueue packet *out-buffer*)
@@ -222,14 +222,15 @@
   (with-accessors ((msg-type msg-type) (orig-addr msg-orig-addr) (seq-num msg-seq-num) (hop-count msg-hop-count) (hop-limit msg-hop-limit)) msg-header
     (incf *messages-received*)
     ;; add message to duplicate set
-    (let ((dtuple (make-instance 'duplicate-tuple :orig-addr orig-addr :msg-type msg-type :seq-num seq-num :exp-time (dt:second+ (dt:now) (config-dup-hold-time *config*)))))
+    (let* ((timestamp (dt:now))
+	   (dtuple (make-instance 'duplicate-tuple :orig-addr orig-addr :msg-type msg-type :seq-num seq-num :exp-time (dt:second+ timestamp (config-dup-hold-time *config*)))))
       (setf (gethash (message-hash msg-type orig-addr) *duplicate-set*) dtuple)
       ;; update message and enqueue
       (incf hop-count)
       (decf hop-limit)
-      (generate-message :pkt-header pkt-header :msg-header msg-header :tlv tlv)
+      ;(generate-message :pkt-header pkt-header :msg-header msg-header :tlv tlv)
       (with-accessors ((tlv-type tlv-type) (value value)) tlv
-	(format nil "~A DUP --> exp-time: ~A | hop-count: ~A msg-type: ~A orig-addr: ~A seq-num: ~A content-type: ~A content: ~A" (dt:now) (slot-value dtuple 'exp-time) hop-count msg-type (usocket:hbo-to-dotted-quad orig-addr) seq-num tlv-type (usocket:hbo-to-dotted-quad value))))))
+	(format nil "~A DUP --> exp-time: ~A | hop-count: ~A msg-type: ~A orig-addr: ~A seq-num: ~A content-type: ~A content: ~A buff:  ~A" timestamp (slot-value dtuple 'exp-time) hop-count msg-type (usocket:hbo-to-dotted-quad orig-addr) seq-num tlv-type (usocket:hbo-to-dotted-quad value) (usocket:hbo-to-dotted-quad (msg-orig-addr msg-header)))))))
 
 (defun retrieve-message (buffer)
   "Unserialize the message and check if it should be processed."
@@ -242,6 +243,7 @@
 	(cond
 	  ((= hop-limit 0) nil) ; discard
 	  ((= hop-count 255) nil) ; discard
+	  ((equal (usocket:hbo-to-dotted-quad orig-addr) (config-host-address *config*)) nil) ; discard
 	  ((not (member msg-type *msg-types*)) nil) ;discard
 	  ((check-duplicate-set msg-type orig-addr) (format nil "~A" (dt:now))) ; discard
 	  (t (process-message pkt-header msg-header tlv)))))))
@@ -308,7 +310,7 @@
   (loop
    (let ((out (out-buffer-get)))
      (when out
-       (usocket:socket-send socket out (userial:buffer-length) :host (config-broadcast-address *config*) :port (config-port *config*))))
+       (usocket:socket-send socket out (length out) :host (config-broadcast-address *config*) :port (config-port *config*))))
    (sleep (config-refresh-interval *config*))))
 
 (defun stop-server ()
