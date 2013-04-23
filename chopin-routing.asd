@@ -6,17 +6,17 @@
   :author "Your Name <your.name@example.com>"
   :license "Specify license here"
   :depends-on (#:sb-concurrency
-	       #:lispbuilder-sdl
+	       #+darwin #:lispbuilder-sdl
 	       #:ironclad
 	       #:usocket
 	       #:userial
 	       #:bordeaux-threads
 	       #:simple-date-time)
   :components ((:file "package")
-	       (:file "class")
-	       (:file "chopin-routing")
+	       #+darwin (:file "class")
+	       #+darwin (:file "chopin-routing")
 	       (:file "daemon")
 	       #+darwin (:file "context")
-	       (:file "viewer")))
+	       #+darwin (:file "viewer")))
 
 #+darwin (load "/Users/josesantos/quicklisp/local-projects/matlisp-master/build/start.lisp")
