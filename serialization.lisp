@@ -1,0 +1,60 @@
+;;; -*- Mode: Lisp -*-
+(in-package :chopin-routing)
+
+(userial:make-accessor-serializer (:pkt-header ph-instance (make-instance 'pkt-header))
+				  :uint8 version+pkt-flags
+				  :uint16 pkt-seq-num)
+
+(defun serialize-pkt-header (pkt-header)
+  (userial:serialize :pkt-header pkt-header))
+
+(defun unserialize-pkt-header (pkt-header)
+  (userial:unserialize :pkt-header :ph-instance pkt-header))
+
+(defun msg-flags+msg-addr-length (msg-header)
+  (merge-4bit-fields (msg-flags msg-header) (msg-addr-length msg-header)))
+
+(defun (setf msg-flags+msg-addr-length) (value msg-header)
+  (multiple-value-bind (flags length) (extract-4bit-fields value)                
+    (setf (msg-flags msg-header) flags
+          (msg-addr-length msg-header) length)))
+
+(userial:make-accessor-serializer (:msg-header mh-instance (make-instance 'msg-header))
+				  :uint8 msg-type
+				  :uint8 msg-flags+msg-addr-length
+				  :uint16 msg-size
+				  :uint32 msg-orig-addr
+				  :uint8 msg-hop-limit
+				  :uint8 msg-hop-count
+				  :uint16 msg-seq-num)
+
+(defun serialize-msg-header (msg-header)
+  (userial:serialize :msg-header msg-header))
+
+(defun unserialize-msg-header (msg-header)
+  (userial:unserialize :msg-header :mh-instance msg-header))
+
+(userial:make-accessor-serializer (:tlv tlv-instance (make-instance 'tlv))
+				  :uint8 tlv-type
+				  :uint8 tlv-flags
+				  :uint8 vlength
+				  :uint32 value)
+
+(defun serialize-tlv (tlv)
+  (userial:serialize :tlv tlv))
+
+(defun unserialize-tlv (tlv)
+  (userial:unserialize :tlv :tlv-instance tlv))
+
+(defun serialize-packet (packet)
+  "Packet, Message and Tlv-Block are encapsulation. What we want is the bytes from
+pkt-header, msg-header and tlv."
+  (let ((buffer (userial:make-buffer)))
+    (userial:with-buffer buffer
+      (let ((pkt-header (pkt-header packet))
+	    (msg-header (msg-header (message packet)))
+	    (tlv (tlv (tlv-block (message packet)))))
+	(serialize-pkt-header pkt-header)
+	(serialize-msg-header msg-header)
+	(serialize-tlv tlv)
+	buffer))))
