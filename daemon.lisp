@@ -31,61 +31,58 @@
 (defun icmp (target)
   (sb-ext:run-program "/sbin/ping" `("-c 1" ,target) :output *standard-output*))
 
-;;; Utils
-
-;; As per RFC 5444 there are some 4 bit fields. Since they occur in pairs, we encode
-;; them in a unsigned-byte 8.
-
-(defun merge-4bit-fields (a b)
-  (logior (dpb a (byte 4 4) 0)
-          (dpb b (byte 4 0) 0)))
-
-(defun extract-4bit-fields (v)
-  (values (ldb (byte 4 4) v)
-          (ldb (byte 4 0) v)))
-
-(defun version+pkt-flags (pkt-header)
-  (merge-4bit-fields (version pkt-header) (pkt-flags pkt-header)))
-
-(defun (setf version+pkt-flags) (value pkt-header)
-  (multiple-value-bind (version flags) (extract-4bit-fields value)
-    (setf (version pkt-header) version
-	  (pkt-flags pkt-header) flags)))
+;; Object factories
 
 (defun make-pkt-header ()
   (make-instance 'pkt-header :pkt-seq-num (incf *pkt-seq-num*)))
 
-(defun make-msg-header ()
-  (make-instance 'msg-header :msg-type (getf *msg-types* :base-station-beacon)))
+(defun make-msg-header (&key (msg-type :base-station-beacon))
+  (make-instance 'msg-header :msg-type (getf *msg-types* msg-type) :msg-seq-num (incf *msg-seq-num*)))
 
-(defun make-tlv (value)
-  (make-instance 'tlv :tlv-type (getf *tlv-types* :relay) :value (usocket:host-byte-order value)))
+(defun make-tlv (value &key (tlv-type :relay))
+  (make-instance 'tlv :tlv-type (getf *tlv-types* tlv-type) :value (usocket:host-byte-order value)))
+
+(defun make-tlv-block (tlvs)
+  (let ((buff (userial:make-buffer)))
+    (userial:with-buffer buff
+      (dolist (entry tlvs)
+	(serialize-tlv entry)))
+    ;; tlvs-length is number of octets of tlvs
+    (make-instance 'tlv-block :tlvs-length (length buff) :tlv tlvs)))
+
+(defun make-message (&key msg-header tlv-block)
+  (make-instance 'message :msg-header msg-header :tlv-block tlv-block))
+
+(defun make-packet (&key (msg-header (make-msg-header)) tlv-block)
+  (make-instance 'packet :pkt-header (make-pkt-header) :message (make-message :msg-header msg-header :tlv-block tlv-block)))
 
 ;;; Message Building
 
-(defun build-packet (pkt-header msg-header tlv)
+(defun build-tlvs (tlv-values &key tlv-type)
+  (loop for value in tlv-values
+	collect (make-tlv value :tlv-type tlv-type)))
+
+(defun build-packet (msg-header tlv-block)
   (userial:with-buffer (userial:make-buffer)
     (serialize-msg-header msg-header)
-    (serialize-tlv tlv)
-    ;; msg-size is size of message including msg-header, that is msg-header+tlv
+    (serialize-tlv-block tlv-block)
+    ;; msg-size is size of message including msg-header, that is msg-header+tlv-block
     (setf (msg-size msg-header) (userial:buffer-length))
-    (make-instance 'packet :pkt-header pkt-header :message (make-instance 'message :msg-header msg-header :tlv-block (make-instance 'tlv-block :tlv tlv)))))
+    (make-packet :msg-header msg-header :tlv-block tlv-block)))
 
 (defun build-message ()
   (if *base-station-p*
       (build-message)
       (build-message :msg-type (getf *msg-types* :node-beacon) :tlv-type (getf *tlv-types* :path))))
 
-(defun generate-message (&key pkt-header msg-header tlv (msg-type (getf *msg-types* :base-station-beacon)) (tlv-type (getf *tlv-types* :relay)) (tlv-value (usocket:host-byte-order (config-host-address *config*))))
-  (let* ((pkt-header (or pkt-header (make-instance 'pkt-header)))
-	 (msg-header (or msg-header (make-instance 'msg-header :msg-type msg-type :msg-seq-num (incf *msg-seq-num*))))
-	 (tlv (or tlv (make-instance 'tlv :tlv-type tlv-type :value tlv-value)))
-	 (packet (build-packet pkt-header msg-header tlv)))
-    (sb-concurrency:enqueue packet *out-buffer*)
-    packet))
+(defun generate-message (tlv-values &key msg-header (msg-type :base-station-beacon) (tlv-type :relay))
+  (let* ((msg-header (or msg-header (make-msg-header :msg-type msg-type)))
+	 (tlvs (build-tlvs tlv-values :tlv-type tlv-type))
+	 (tlv-block (make-tlv-block tlvs)))
+    (sb-concurrency:enqueue (build-packet msg-header tlv-block) *out-buffer*)))
 
 (defun message-hash (field1 field2)
-  "Hashing for duplicate set"
+  "Hashing for hashtable key"
   (ironclad:byte-array-to-hex-string (ironclad:digest-sequence :sha1 (ironclad:ascii-string-to-byte-array (format nil "~a~a" field1 field2)))))
 
 ;;; Processing

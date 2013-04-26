@@ -1,6 +1,25 @@
 ;;; -*- Mode: Lisp -*-
 (in-package :chopin-routing)
 
+;; As per RFC 5444 there are some 4 bit fields. Since they occur in pairs, we encode
+;; them in a unsigned-byte 8.
+
+(defun merge-4bit-fields (a b)
+  (logior (dpb a (byte 4 4) 0)
+          (dpb b (byte 4 0) 0)))
+
+(defun extract-4bit-fields (v)
+  (values (ldb (byte 4 4) v)
+          (ldb (byte 4 0) v)))
+
+(defun version+pkt-flags (pkt-header)
+  (merge-4bit-fields (version pkt-header) (pkt-flags pkt-header)))
+
+(defun (setf version+pkt-flags) (value pkt-header)
+  (multiple-value-bind (version flags) (extract-4bit-fields value)
+    (setf (version pkt-header) version
+	  (pkt-flags pkt-header) flags)))
+
 (userial:make-accessor-serializer (:pkt-header ph-instance (make-instance 'pkt-header))
 				  :uint8 version+pkt-flags
 				  :uint16 pkt-seq-num)
@@ -34,6 +53,18 @@
 (defun unserialize-msg-header (msg-header)
   (userial:unserialize :msg-header :mh-instance msg-header))
 
+(userial:make-accessor-serializer (:tlv-block tlv-block-instance (make-instance 'tlv-block))
+				  :uint16 tlvs-length)
+
+(defun serialize-tlv-block (tlv-block)
+  (with-accessors ((tlv tlv)) tlv-block
+    (userial:serialize :tlv-block tlv-block)
+    (dolist (entry tlv)
+      (serialize-tlv entry))))
+
+(defun unserialize-tlv-block (tlv-block)
+  (userial:unserialize :tlv-block :tlv-block-instance tlv-block))
+
 (userial:make-accessor-serializer (:tlv tlv-instance (make-instance 'tlv))
 				  :uint8 tlv-type
 				  :uint8 tlv-flags
@@ -53,8 +84,8 @@ pkt-header, msg-header and tlv."
     (userial:with-buffer buffer
       (let ((pkt-header (pkt-header packet))
 	    (msg-header (msg-header (message packet)))
-	    (tlv (tlv (tlv-block (message packet)))))
+	    (tlv-block (tlv-block (message packet))))
 	(serialize-pkt-header pkt-header)
 	(serialize-msg-header msg-header)
-	(serialize-tlv tlv)
+	(serialize-tlv-block tlv-block)
 	buffer))))

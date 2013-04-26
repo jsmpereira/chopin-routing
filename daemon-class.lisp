@@ -84,7 +84,9 @@
    :msg-seq-num *msg-seq-num*))
 
 (defclass tlv-block ()
-  ((tlv :initarg :tlv :reader tlv)))
+  ((tlvs-length :initarg :tlvs-length :reader tlvs-length
+		:type '(unsigned-byte 16))
+   (tlv :initarg :tlv :reader tlv)))
 
 (defclass tlv ()
   ((tlv-type :initarg :tlv-type
