@@ -91,6 +91,7 @@
   (gethash (message-hash msg-type orig-addr) *duplicate-set*))
 
 (defun update-link-set (msg-orig-addr)
+  "TODO: When updating Link Set one needs to rebuild routing table."
   (let* ((local-addr (config-host-address *config*))
 	 (ref-interval (config-refresh-interval *config*))
 	 (neighb-holding (config-neighb-hold-time *config*))
@@ -105,6 +106,14 @@
 	  (make-instance 'duplicate-tuple :orig-addr msg-orig-addr :msg-type msg-type :seq-num msg-seq-num
 			 :exp-time (dt:second+ (dt:now) (config-dup-hold-time *config*))))))
 
+(defun update-routing-table (msg-header tlv-block)
+  (with-slots (msg-orig-addr msg-seq-num msg-hop-count) msg-header
+    (with-slots (tlv) tlv-block
+      (let ((destination (value (first tlv))))
+	(setf (gethash (message-hash destination msg-orig-addr) *routing-table*)
+	      (make-rt-entry :destination (usocket:hbo-to-dotted-quad destination)
+			     :next-hop (usocket:hbo-to-dotted-quad msg-orig-addr) :hop-count msg-hop-count :seq-num msg-seq-num))))))
+
 (defun process-message (pkt-header msg-header tlv-block)
   (with-accessors ((msg-type msg-type) (orig-addr msg-orig-addr) (seq-num msg-seq-num) (hop-count msg-hop-count) (hop-limit msg-hop-limit)) msg-header
     (let ((link-tuple (update-link-set orig-addr))
@@ -113,8 +122,8 @@
       ;; update message and enqueue
       ;; Base Station sends :relay messages to inform the nodes of its presence
       ;; Nodes send :path messages to inform base station of their presence
-      (when (and (= msg-type (getf *msg-types* :base-station-beacon)) (not *base-station-p*))
-	;(setf (gethash (message-hash (value tlv) orig-addr) *routing-table*) (make-rt-entry :destination (usocket:hbo-to-dotted-quad (value tlv)) :next-hop (usocket:hbo-to-dotted-quad orig-addr) :hop-count hop-count :seq-num seq-num))
+      (when (= msg-type (getf *msg-types* :base-station-beacon))
+	(update-routing-table msg-header tlv-block)
 	(setf orig-addr (usocket:host-byte-order (config-host-address *config*)))
 	(incf hop-count)
 	(decf hop-limit))
