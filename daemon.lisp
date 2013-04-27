@@ -122,28 +122,25 @@
        ;(gethash (message-hash (value tlv) orig-addr) *routing-table*) (make-rt-entry :destination (usocket:hbo-to-dotted-quad (value tlv)) :next-hop )
 	t) ;; INCOMPLETE
 					; (generate-message :pkt-header pkt-header :msg-header msg-header :tlv tlv)
-      (format nil "~A DUP --> exp-time: ~A | hop-count: ~A msg-type: ~A orig-addr: ~A seq-num: ~A content: ~A buff:  ~A" (dt:now) (slot-value duplicate-tuple 'exp-time) hop-count msg-type (usocket:hbo-to-dotted-quad orig-addr) seq-num (tlv tlv-block) (usocket:hbo-to-dotted-quad (msg-orig-addr msg-header))))))
+      (format nil "~A DUP --> exp-time: ~A | hop-count: ~A msg-type: ~A orig-addr: ~A seq-num: ~A content: ~A buff:  ~A" (dt:now) (slot-value duplicate-tuple 'exp-time)
+	      hop-count msg-type (usocket:hbo-to-dotted-quad orig-addr) seq-num (tlv tlv-block) (usocket:hbo-to-dotted-quad (msg-orig-addr msg-header))))))
 
 (defun retrieve-message (buffer)
   "Unserialize the message and check if it should be processed."
   (multiple-value-bind (pkt-header msg-header tlv-block)
       (unserialize-packet buffer)
-    (format t "~A" (tlv tlv-block))
     (with-accessors ((msg-type msg-type) (orig-addr msg-orig-addr) (seq-num msg-seq-num) (hop-limit msg-hop-limit) (hop-count msg-hop-count)) msg-header
       (cond
 	((= hop-limit 0) nil) ; discard
 	((= hop-count 255) nil) ; discard
-	;((equal (usocket:hbo-to-dotted-quad orig-addr) (config-host-address *config*)) nil) ; discard
+	((equal (usocket:hbo-to-dotted-quad orig-addr) (config-host-address *config*)) nil) ; discard
 	((check-duplicate-set orig-addr seq-num) (format nil "~A" (dt:now))) ; discard
 	((not (member msg-type *msg-types*)) nil) ;discard
 	(t (process-message pkt-header msg-header tlv-block))))))
 
 (defun out-buffer-get ()
-  (let ((buf (userial:make-buffer)))
-    (userial:with-buffer buf
-      (let ((packet (sb-concurrency:dequeue *out-buffer*)))
-	(when packet
-	  (serialize-packet packet))))))
+  (let ((packet (sb-concurrency:dequeue *out-buffer*)))
+    (when packet (serialize-packet packet))))
 
 ;; timer / event scheduling
 

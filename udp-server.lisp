@@ -33,7 +33,7 @@
 	 (let ((read (retrieve-message buf)))
 	   (with-open-file (s (merge-pathnames "received" (user-homedir-pathname)) :direction :output
 			      :if-exists :supersede)
-	     (format s "Received ~A (~A) bytes from ~As:~A --> ~A~%" size (length buffer) host port read))))))))
+	     (format s "Received ~A (~A) bytes from ~As:~A --> ~A~%" size (length buf) host port read))))))))
 
 (defun writer (socket)
   (loop

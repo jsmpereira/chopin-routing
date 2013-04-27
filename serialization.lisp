@@ -65,7 +65,6 @@
 
 (defun unserialize-tlv-block (tlv-block)
   "A bit of a hack. Since we're using 32bit addresses, the tlv field is always 7 octets."
-  (userial:buffer-rewind)
   (let* ((tlvb (userial:unserialize :tlv-block :tlv-block-instance tlv-block)))
     (setf (tlv tlvb)
 	  (loop repeat (/ (tlvs-length tlvb) 7)
