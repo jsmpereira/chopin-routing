@@ -9,6 +9,7 @@
 (defparameter *messages-received* 0)
 
 (defparameter *config* nil)
+(defparameter *max-jitter* nil) ; (/ refresh-interval 4)
 
 (defparameter *msg-seq-num* 0) ; wrap-around is 65535
 (defparameter *pkt-seq-num* 0) ; same here
@@ -21,12 +22,8 @@
 (defparameter *out-buffer* (sb-concurrency:make-queue))
 
 (defparameter *duplicate-set* (make-hash-table :test 'equal))
-
-(defclass duplicate-tuple ()
-  ((orig-addr :initarg :orig-addr :accessor orig-addr)
-   (msg-type :initarg :msg-type :accessor msg-type)
-   (seq-num :initarg :seq-num :accessor seq-num)
-   (exp-time :initarg :exp-time :accessor exp-time)))
+(defparameter *link-set* (make-hash-table :test 'equal))
+(defparameter *routing-table* (make-hash-table :test 'equal))
 
 (defun icmp (target)
   (sb-ext:run-program "/sbin/ping" `("-c 1" ,target) :output *standard-output*))
@@ -54,11 +51,12 @@
   (make-instance 'message :msg-header msg-header :tlv-block tlv-block))
 
 (defun make-packet (&key (msg-header (make-msg-header)) tlv-block)
-  (make-instance 'packet :pkt-header (make-pkt-header) :message (make-message :msg-header msg-header :tlv-block tlv-block)))
+  (make-instance 'packet :pkt-header (make-pkt-header)
+		 :message (make-message :msg-header msg-header :tlv-block tlv-block)))
 
 ;;; Message Building
 
-(defun build-tlvs (tlv-values &key tlv-type)
+(defun build-tlvs (tlv-values &key (tlv-type :relay))
   (loop for value in tlv-values
 	collect (make-tlv value :tlv-type tlv-type)))
 
@@ -75,7 +73,8 @@
       (build-message)
       (build-message :msg-type (getf *msg-types* :node-beacon) :tlv-type (getf *tlv-types* :path))))
 
-(defun generate-message (tlv-values &key msg-header (msg-type :base-station-beacon) (tlv-type :relay))
+(defun generate-message (&key msg-header (msg-type :base-station-beacon) (tlv-type :relay)
+			   (tlv-values (list (config-host-address *config*))))
   (let* ((msg-header (or msg-header (make-msg-header :msg-type msg-type)))
 	 (tlvs (build-tlvs tlv-values :tlv-type tlv-type))
 	 (tlv-block (make-tlv-block tlvs)))
@@ -83,7 +82,8 @@
 
 (defun message-hash (field1 field2)
   "Hashing for hashtable key"
-  (ironclad:byte-array-to-hex-string (ironclad:digest-sequence :sha1 (ironclad:ascii-string-to-byte-array (format nil "~a~a" field1 field2)))))
+  (ironclad:byte-array-to-hex-string
+   (ironclad:digest-sequence :sha1 (ironclad:ascii-string-to-byte-array (format nil "~a~a" field1 field2)))))
 
 ;;; Processing
 
@@ -99,37 +99,51 @@
     (unless (gethash ls-hash *link-set*) ;; stopped here. Validity time from OSLR makes sense. Need to update time when entry already exists
       (setf (gethash ls-hash *link-set*) (make-instance 'link-tuple :local-addr local-addr :neighbor-addr (usocket:hbo-to-dotted-quad msg-orig-addr) :l-time l-time)))))
 
-(defun process-message (pkt-header msg-header tlv)
+(defun update-duplicate-set (msg-header)
+  (with-slots (msg-type msg-orig-addr msg-seq-num) msg-header
+    (setf (gethash (message-hash msg-type msg-orig-addr) *duplicate-set*)
+	  (make-instance 'duplicate-tuple :orig-addr msg-orig-addr :msg-type msg-type :seq-num msg-seq-num
+			 :exp-time (dt:second+ (dt:now) (config-dup-hold-time *config*))))))
+
+(defun process-message (pkt-header msg-header tlv-block)
   (with-accessors ((msg-type msg-type) (orig-addr msg-orig-addr) (seq-num msg-seq-num) (hop-count msg-hop-count) (hop-limit msg-hop-limit)) msg-header
-    (update-link-set orig-addr)
-    (incf *messages-received*)
-    ;; add message to duplicate set
-    (let* ((timestamp (dt:now))
-	   (dtuple (make-instance 'duplicate-tuple :orig-addr orig-addr :msg-type msg-type :seq-num seq-num :exp-time (dt:second+ timestamp (config-dup-hold-time *config*)))))
-      (setf (gethash (message-hash msg-type orig-addr) *duplicate-set*) dtuple)
+    (let ((link-tuple (update-link-set orig-addr))
+	  (duplicate-tuple (update-duplicate-set msg-header))) ; add message to duplicate set
+      (incf *messages-received*)
       ;; update message and enqueue
-      (incf hop-count)
-      (decf hop-limit)
-      ;(generate-message :pkt-header pkt-header :msg-header msg-header :tlv tlv)
-      (with-accessors ((tlv-type tlv-type) (value value)) tlv
-	(format nil "~A DUP --> exp-time: ~A | hop-count: ~A msg-type: ~A orig-addr: ~A seq-num: ~A content-type: ~A content: ~A buff:  ~A" timestamp (slot-value dtuple 'exp-time) hop-count msg-type (usocket:hbo-to-dotted-quad orig-addr) seq-num tlv-type (usocket:hbo-to-dotted-quad value) (usocket:hbo-to-dotted-quad (msg-orig-addr msg-header)))))))
+      ;; Base Station sends :relay messages to inform the nodes of its presence
+      ;; Nodes send :path messages to inform base station of their presence
+      (when (and (= msg-type (getf *msg-types* :base-station-beacon)) (not *base-station-p*))
+	;(setf (gethash (message-hash (value tlv) orig-addr) *routing-table*) (make-rt-entry :destination (usocket:hbo-to-dotted-quad (value tlv)) :next-hop (usocket:hbo-to-dotted-quad orig-addr) :hop-count hop-count :seq-num seq-num))
+	(setf orig-addr (usocket:host-byte-order (config-host-address *config*)))
+	(incf hop-count)
+	(decf hop-limit))
+      (when (and (= msg-type (getf *msg-types* :node-beacon)) *base-station-p*)
+       ;(gethash (message-hash (value tlv) orig-addr) *routing-table*) (make-rt-entry :destination (usocket:hbo-to-dotted-quad (value tlv)) :next-hop )
+	t) ;; INCOMPLETE
+					; (generate-message :pkt-header pkt-header :msg-header msg-header :tlv tlv)
+      (format nil "~A DUP --> exp-time: ~A | hop-count: ~A msg-type: ~A orig-addr: ~A seq-num: ~A content: ~A buff:  ~A" (dt:now) (slot-value duplicate-tuple 'exp-time) hop-count msg-type (usocket:hbo-to-dotted-quad orig-addr) seq-num (tlv tlv-block) (usocket:hbo-to-dotted-quad (msg-orig-addr msg-header))))))
 
 (defun retrieve-message (buffer)
   "Unserialize the message and check if it should be processed."
-  (userial:with-buffer buffer
-    (userial:buffer-rewind)
-    (let ((pkt-header (unserialize-pkt-header (make-instance 'pkt-header)))
-	  (msg-header (unserialize-msg-header (make-instance 'msg-header)))
-	  (tlv (unserialize-tlv (make-instance 'tlv))))
-      (with-accessors ((msg-type msg-type) (orig-addr msg-orig-addr) (seq-num msg-seq-num) (hop-limit msg-hop-limit) (hop-count msg-hop-count)) msg-header
-	(cond
-	  ((= hop-limit 0) nil) ; discard
-	  ((= hop-count 255) nil) ; discard
-	  ((equal (usocket:hbo-to-dotted-quad orig-addr) (config-host-address *config*)) nil) ; discard
-	  ((check-duplicate-set orig-addr seq-num) (format nil "~A" (dt:now))) ; discard
-	  ((not (member msg-type *msg-types*)) nil) ;discard
+  (multiple-value-bind (pkt-header msg-header tlv-block)
+      (unserialize-packet buffer)
+    (format t "~A" (tlv tlv-block))
+    (with-accessors ((msg-type msg-type) (orig-addr msg-orig-addr) (seq-num msg-seq-num) (hop-limit msg-hop-limit) (hop-count msg-hop-count)) msg-header
+      (cond
+	((= hop-limit 0) nil) ; discard
+	((= hop-count 255) nil) ; discard
+	;((equal (usocket:hbo-to-dotted-quad orig-addr) (config-host-address *config*)) nil) ; discard
+	((check-duplicate-set orig-addr seq-num) (format nil "~A" (dt:now))) ; discard
+	((not (member msg-type *msg-types*)) nil) ;discard
+	(t (process-message pkt-header msg-header tlv-block))))))
 
-	  (t (process-message pkt-header msg-header tlv)))))))
+(defun out-buffer-get ()
+  (let ((buf (userial:make-buffer)))
+    (userial:with-buffer buf
+      (let ((packet (sb-concurrency:dequeue *out-buffer*)))
+	(when packet
+	  (serialize-packet packet))))))
 
 ;; timer / event scheduling
 
@@ -143,13 +157,6 @@
   (loop for key being the hash-keys in *link-set* using (hash-value val)
 	when (dt:time>= (dt:now) (slot-value val 'l-time))
 	do (remhash key *link-set*)))
-
-(defun out-buffer-get ()
-  (let ((buf (userial:make-buffer)))
-    (userial:with-buffer buf
-      (let ((packet (sb-concurrency:dequeue *out-buffer*)))
-	(when packet
-	  (serialize-packet packet))))))
 
 (defun start-timers ()
   "Setup and start timers."

@@ -84,9 +84,12 @@
    :msg-seq-num *msg-seq-num*))
 
 (defclass tlv-block ()
-  ((tlvs-length :initarg :tlvs-length :reader tlvs-length
+  ((tlvs-length :initarg :tlvs-length :accessor tlvs-length
 		:type '(unsigned-byte 16))
-   (tlv :initarg :tlv :reader tlv)))
+   (tlv :initarg :tlv :accessor tlv))
+  (:default-initargs
+   :tlvs-length 0
+   :tlv nil))
 
 (defclass tlv ()
   ((tlv-type :initarg :tlv-type
@@ -104,3 +107,8 @@
   (:default-initargs
    :tlv-flags #b00010000
    :length 4)) ; for 32-bit address
+
+(defmethod print-object ((object tlv) stream)
+  (print-unreadable-object (object stream :type t)
+    (with-slots (tlv-type tlv-flags length value) object
+      (format stream "~A ~A ~A ~A" tlv-type tlv-flags length (usocket:hbo-to-dotted-quad value)))))

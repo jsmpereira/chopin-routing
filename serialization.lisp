@@ -60,10 +60,17 @@
   (with-accessors ((tlv tlv)) tlv-block
     (userial:serialize :tlv-block tlv-block)
     (dolist (entry tlv)
-      (serialize-tlv entry))))
+      (serialize-tlv entry)))
+  (userial:get-buffer))
 
 (defun unserialize-tlv-block (tlv-block)
-  (userial:unserialize :tlv-block :tlv-block-instance tlv-block))
+  "A bit of a hack. Since we're using 32bit addresses, the tlv field is always 7 octets."
+  (userial:buffer-rewind)
+  (let* ((tlvb (userial:unserialize :tlv-block :tlv-block-instance tlv-block)))
+    (setf (tlv tlvb)
+	  (loop repeat (/ (tlvs-length tlvb) 7)
+		collect (unserialize-tlv (make-instance 'tlv))))
+    tlvb))
 
 (userial:make-accessor-serializer (:tlv tlv-instance (make-instance 'tlv))
 				  :uint8 tlv-type
@@ -79,7 +86,7 @@
 
 (defun serialize-packet (packet)
   "Packet, Message and Tlv-Block are encapsulation. What we want is the bytes from
-pkt-header, msg-header and tlv."
+pkt-header, msg-header and tlv-block."
   (let ((buffer (userial:make-buffer)))
     (userial:with-buffer buffer
       (let ((pkt-header (pkt-header packet))
@@ -89,3 +96,13 @@ pkt-header, msg-header and tlv."
 	(serialize-msg-header msg-header)
 	(serialize-tlv-block tlv-block)
 	buffer))))
+
+(defun unserialize-packet (buffer)
+  "pkt-header, msg-header, tlvs-length, tlvs"
+  (let ((buff buffer))
+    (userial:with-buffer buff
+      (userial:buffer-rewind)
+      (let* ((pkt-header (unserialize-pkt-header (make-instance 'pkt-header)))
+	     (msg-header (unserialize-msg-header (make-instance 'msg-header)))
+	     (tlv-block (unserialize-tlv-block (make-instance 'tlv-block))))
+	(values pkt-header msg-header tlv-block)))))
