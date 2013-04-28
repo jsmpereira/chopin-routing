@@ -68,11 +68,6 @@
     (setf (msg-size msg-header) (userial:buffer-length))
     (make-packet :msg-header msg-header :tlv-block tlv-block)))
 
-(defun build-message ()
-  (if *base-station-p*
-      (build-message)
-      (build-message :msg-type (getf *msg-types* :node-beacon) :tlv-type (getf *tlv-types* :path))))
-
 (defun generate-message (&key msg-header (msg-type :base-station-beacon) (tlv-type :relay)
 			   (tlv-values (list (config-host-address *config*))))
   (let* ((msg-header (or msg-header (make-msg-header :msg-type msg-type)))
@@ -91,7 +86,7 @@
   (gethash (message-hash msg-type orig-addr) *duplicate-set*))
 
 (defun update-link-set (msg-orig-addr)
-  "TODO: When updating Link Set one needs to rebuild routing table."
+  "TODO: When updating Link Set need to rebuild routing table."
   (let* ((local-addr (config-host-address *config*))
 	 (ref-interval (config-refresh-interval *config*))
 	 (neighb-holding (config-neighb-hold-time *config*))
@@ -107,6 +102,7 @@
 			 :exp-time (dt:second+ (dt:now) (config-dup-hold-time *config*))))))
 
 (defun update-routing-table (msg-header tlv-block)
+  "TODO: Need to filter bogus destinations, such as 0.0.0.0"
   (with-slots (msg-orig-addr msg-seq-num msg-hop-count) msg-header
     (with-slots (tlv) tlv-block
       (let ((destination (value (first tlv))))
@@ -116,23 +112,24 @@
 
 (defun process-message (pkt-header msg-header tlv-block)
   (with-accessors ((msg-type msg-type) (orig-addr msg-orig-addr) (seq-num msg-seq-num) (hop-count msg-hop-count) (hop-limit msg-hop-limit)) msg-header
+    (incf *messages-received*)
+    (unless *base-station-p*
+      (incf hop-count) ; maybe check here if incf/decf values result in packet drop?
+      (decf hop-limit))
+    (update-routing-table msg-header tlv-block)
+    ;; Base Station sends :relay messages to inform the nodes of its presence
+    ;; Nodes send :path messages to inform base station of their presence
+    (cond
+      ((= msg-type (getf *msg-types* :base-station-beacon)) ; forward with unchanged content - BROADCAST
+       (setf orig-addr (usocket:host-byte-order (config-host-address *config*))))
+      ((= msg-type (getf *msg-types* :node-beacon)) ; append current node address and forward to next-hop towards base station - UNICAST
+       (adjoin (make-tlv (usocket:host-byte-order (config-host-address *config*)) :tlv-type :path) (tlv tlv-block)))
+      (t nil)) ;; INCOMPLETE
+    ;(generate-message :pkt-header pkt-header :msg-header msg-header :tlv tlv)
     (let ((link-tuple (update-link-set orig-addr))
-	  (duplicate-tuple (update-duplicate-set msg-header))) ; add message to duplicate set
-      (incf *messages-received*)
-      ;; update message and enqueue
-      ;; Base Station sends :relay messages to inform the nodes of its presence
-      ;; Nodes send :path messages to inform base station of their presence
-      (when (= msg-type (getf *msg-types* :base-station-beacon))
-	(update-routing-table msg-header tlv-block)
-	(setf orig-addr (usocket:host-byte-order (config-host-address *config*)))
-	(incf hop-count)
-	(decf hop-limit))
-      (when (and (= msg-type (getf *msg-types* :node-beacon)) *base-station-p*)
-       ;(gethash (message-hash (value tlv) orig-addr) *routing-table*) (make-rt-entry :destination (usocket:hbo-to-dotted-quad (value tlv)) :next-hop )
-	t) ;; INCOMPLETE
-					; (generate-message :pkt-header pkt-header :msg-header msg-header :tlv tlv)
-      (format nil "~A DUP --> exp-time: ~A | hop-count: ~A msg-type: ~A orig-addr: ~A seq-num: ~A content: ~A buff:  ~A" (dt:now) (slot-value duplicate-tuple 'exp-time)
-	      hop-count msg-type (usocket:hbo-to-dotted-quad orig-addr) seq-num (tlv tlv-block) (usocket:hbo-to-dotted-quad (msg-orig-addr msg-header))))))
+	  (duplicate-tuple (update-duplicate-set msg-header))) ; add message to duplicate set)
+      (format nil "~A DUP --> exp-time: ~A | hop-count: ~A msg-type: ~A orig-addr: ~A seq-num: ~A content: ~A~%" (dt:now) (slot-value duplicate-tuple 'exp-time)
+	      hop-count msg-type (usocket:hbo-to-dotted-quad orig-addr) seq-num (tlv tlv-block)))))
 
 (defun retrieve-message (buffer)
   "Unserialize the message and check if it should be processed."
