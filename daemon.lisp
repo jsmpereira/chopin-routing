@@ -2,9 +2,6 @@
 
 (in-package :chopin-routing)
 
-(defparameter *this-node* nil)
-(defparameter *socket* nil)
-
 ;; stats
 (defparameter *messages-received* 0)
 
@@ -24,9 +21,6 @@
 (defparameter *duplicate-set* (make-hash-table :test 'equal))
 (defparameter *link-set* (make-hash-table :test 'equal))
 (defparameter *routing-table* (make-hash-table :test 'equal))
-
-(defun icmp (target)
-  (sb-ext:run-program "/sbin/ping" `("-c 1" ,target) :output *standard-output*))
 
 ;; Object factories
 
@@ -119,17 +113,19 @@
     (update-routing-table msg-header tlv-block)
     ;; Base Station sends :relay messages to inform the nodes of its presence
     ;; Nodes send :path messages to inform base station of their presence
-    (cond
-      ((= msg-type (getf *msg-types* :base-station-beacon)) ; forward with unchanged content - BROADCAST
-       (setf orig-addr (usocket:host-byte-order (config-host-address *config*))))
-      ((= msg-type (getf *msg-types* :node-beacon)) ; append current node address and forward to next-hop towards base station - UNICAST
-       (adjoin (make-tlv (usocket:host-byte-order (config-host-address *config*)) :tlv-type :path) (tlv tlv-block)))
-      (t nil)) ;; INCOMPLETE
     ;(generate-message :pkt-header pkt-header :msg-header msg-header :tlv tlv)
-    (let ((link-tuple (update-link-set orig-addr))
-	  (duplicate-tuple (update-duplicate-set msg-header))) ; add message to duplicate set)
-      (format nil "~A DUP --> exp-time: ~A | hop-count: ~A msg-type: ~A orig-addr: ~A seq-num: ~A content: ~A~%" (dt:now) (slot-value duplicate-tuple 'exp-time)
-	      hop-count msg-type (usocket:hbo-to-dotted-quad orig-addr) seq-num (tlv tlv-block)))))
+    (let* ((link-tuple (update-link-set orig-addr))
+	  (duplicate-tuple (update-duplicate-set msg-header))
+	  (rcv (format nil "~A DUP --> exp-time: ~A | hop-count: ~A msg-type: ~A orig-addr: ~A seq-num: ~A content: ~A~%" (dt:now) (slot-value duplicate-tuple 'exp-time)
+	      hop-count msg-type (usocket:hbo-to-dotted-quad orig-addr) seq-num (tlv tlv-block)))) ; add message to duplicate set)
+      (cond
+	((= msg-type (getf *msg-types* :base-station-beacon)) ; forward with unchanged content - BROADCAST
+	 (setf orig-addr (usocket:host-byte-order (config-host-address *config*))))
+	((= msg-type (getf *msg-types* :node-beacon)) ; append current node address and forward to next-hop towards base station - UNICAST
+	 (adjoin (make-tlv (usocket:host-byte-order (config-host-address *config*)) :tlv-type :path) (tlv tlv-block)))
+	(t nil)) ;; INCOMPLETE)
+      rcv)))
+  
 
 (defun retrieve-message (buffer)
   "Unserialize the message and check if it should be processed."
@@ -165,7 +161,11 @@
   "Setup and start timers."
   (sb-ext:schedule-timer (sb-ext:make-timer #'check-duplicate-holding :thread t) 10 :repeat-interval (* 3 (config-refresh-interval *config*)))
   (sb-ext:schedule-timer (sb-ext:make-timer #'check-link-set-validity :thread t) 60 :repeat-interval (* 3 (config-timer-repeat-interval *config*)))
-  (sb-ext:schedule-timer (sb-ext:make-timer #'generate-message :thread t) 5 :repeat-interval (config-refresh-interval *config*))
+  (sb-ext:schedule-timer (sb-ext:make-timer #'(lambda ()
+						(if *base-station-p*
+						    (generate-message)
+						    (generate-message :msg-type :node-beacon :tlv-type :path)))
+					    :thread t) 5 :repeat-interval (config-refresh-interval *config*))
   (sb-ext:schedule-timer (sb-ext:make-timer #'screen :thread t) 5 :repeat-interval (config-refresh-interval *config*)))
 
 (defun stop-timers ()
