@@ -123,22 +123,24 @@
 	 (setf orig-addr (usocket:host-byte-order (config-host-address *config*))))
 	((= msg-type (getf *msg-types* :node-beacon)) ; append current node address and forward to next-hop towards base station - UNICAST
 	 (adjoin (make-tlv (usocket:host-byte-order (config-host-address *config*)) :tlv-type :path) (tlv tlv-block)))
-	(t nil)) ;; INCOMPLETE)
-      rcv)))
-  
+	(t nil))
+      (rcvlog (format nil "MSG: ~A" rcv)))))
 
-(defun retrieve-message (buffer)
+(defun retrieve-message (buffer size)
   "Unserialize the message and check if it should be processed."
   (multiple-value-bind (pkt-header msg-header tlv-block)
       (unserialize-packet buffer)
-    (with-accessors ((msg-type msg-type) (orig-addr msg-orig-addr) (seq-num msg-seq-num) (hop-limit msg-hop-limit) (hop-count msg-hop-count)) msg-header
-      (cond
-	((= hop-limit 0) nil) ; discard
-	((= hop-count 255) nil) ; discard
-	((equal (usocket:hbo-to-dotted-quad orig-addr) (config-host-address *config*)) nil) ; discard
-	((check-duplicate-set orig-addr seq-num) (format nil "~A" (dt:now))) ; discard
-	((not (member msg-type *msg-types*)) nil) ;discard
-	(t (process-message pkt-header msg-header tlv-block))))))
+    (when (= size (length buffer)) ;; read size must match unserialized length
+      (with-accessors ((msg-type msg-type) (orig-addr msg-orig-addr) (seq-num msg-seq-num) (hop-limit msg-hop-limit) (hop-count msg-hop-count)) msg-header
+	(cond
+	  ((= hop-limit 0) nil) ; discard
+	  ((= hop-count 255) nil) ; discard
+	  ((equal (usocket:hbo-to-dotted-quad orig-addr) (config-host-address *config*)) nil) ; discard
+	  ((check-duplicate-set orig-addr seq-num) (format nil "~A" (dt:now))) ; discard
+	  ((not (member msg-type *msg-types*)) nil) ;discard
+	  (t (progn
+	       (rcvlog (format nil "(~A) len: ~A src: ~A" size (length buffer) (usocket:hbo-to-dotted-quad orig-addr)))
+	       (process-message pkt-header msg-header tlv-block))))))))
 
 (defun out-buffer-get ()
   (let ((packet (sb-concurrency:dequeue *out-buffer*)))
@@ -192,6 +194,10 @@
 ------ Link Set -----~%
 ~A~%" *routing-table* (print-hash *duplicate-set*) (print-hash *link-set*))))
 
+(defun rcvlog (&rest rest)
+  (with-open-file (s (merge-pathnames "received" (user-homedir-pathname)) :direction :output
+		     :if-exists :append)
+    (format s "~A ~{~A ~}~%" (dt:now) rest)))
 
 ;; util
 

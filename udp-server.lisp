@@ -28,12 +28,9 @@
   (let ((buffer (make-array 32 :element-type '(unsigned-byte 8) :fill-pointer 0 :adjustable t)))
     (loop
      (multiple-value-bind (buf size host port)
-	 (usocket:socket-receive socket buffer (length buffer))
-       (unless (equal (usocket:vector-quad-to-dotted-quad host) (config-host-address *config*))
-	 (let ((read (retrieve-message buf)))
-	   (with-open-file (s (merge-pathnames "received" (user-homedir-pathname)) :direction :output
-			      :if-exists :supersede)
-	     (format s "Received ~A (~A) bytes from ~As:~A --> ~A~%" size (length buf) host port read))))))))
+	 (usocket:socket-receive socket buffer nil)
+       (rcvlog (format nil "---> ~A" size))
+       (retrieve-message buf size)))))
 
 (defun writer (socket)
   (loop
