@@ -11,7 +11,7 @@
 (defparameter *msg-seq-num* 0) ; wrap-around is 65535
 (defparameter *pkt-seq-num* 0) ; same here
 
-(defparameter *base-station-p* nil)
+(defparameter *base-station-p* t)
 
 (defparameter *msg-types* '(:base-station-beacon 1 :node-beacon 2))
 (defparameter *tlv-types* '(:relay 1 :path 2))
@@ -62,11 +62,11 @@
     (setf (msg-size msg-header) (userial:buffer-length))
     (make-packet :msg-header msg-header :tlv-block tlv-block)))
 
-(defun generate-message (&key msg-header (msg-type :base-station-beacon) (tlv-type :relay)
+(defun generate-message (&key msg-header tlv (msg-type :base-station-beacon) (tlv-type :relay)
 			   (tlv-values (list (config-host-address *config*))))
   (let* ((msg-header (or msg-header (make-msg-header :msg-type msg-type)))
 	 (tlvs (build-tlvs tlv-values :tlv-type tlv-type))
-	 (tlv-block (make-tlv-block tlvs)))
+	 (tlv-block (or tlv (make-tlv-block tlvs))))
     (sb-concurrency:enqueue (build-packet msg-header tlv-block) *out-buffer*)))
 
 (defun message-hash (field1 field2)
@@ -99,10 +99,10 @@
   "TODO: Need to filter bogus destinations, such as 0.0.0.0"
   (with-slots (msg-orig-addr msg-seq-num msg-hop-count) msg-header
     (with-slots (tlv) tlv-block
-      (let ((destination (value (first tlv))))
+      (let ((destination (value (first (last tlv)))))
 	(setf (gethash (message-hash destination msg-orig-addr) *routing-table*)
 	      (make-rt-entry :destination (usocket:hbo-to-dotted-quad destination)
-			     :next-hop (usocket:hbo-to-dotted-quad msg-orig-addr) :hop-count msg-hop-count :seq-num msg-seq-num))))))
+			     :next-hop tlv :hop-count msg-hop-count :seq-num msg-seq-num))))))
 
 (defun process-message (pkt-header msg-header tlv-block)
   (with-accessors ((msg-type msg-type) (orig-addr msg-orig-addr) (seq-num msg-seq-num) (hop-count msg-hop-count) (hop-limit msg-hop-limit)) msg-header
@@ -121,8 +121,9 @@
       (cond
 	((= msg-type (getf *msg-types* :base-station-beacon)) ; forward with unchanged content - BROADCAST
 	 (setf orig-addr (usocket:host-byte-order (config-host-address *config*))))
-	((= msg-type (getf *msg-types* :node-beacon)) ; append current node address and forward to next-hop towards base station - UNICAST
-	 (adjoin (make-tlv (usocket:host-byte-order (config-host-address *config*)) :tlv-type :path) (tlv tlv-block)))
+	((and (= msg-type (getf *msg-types* :node-beacon)) (not *base-station-p*)) ; append current node address and forward to next-hop towards base station - UNICAST
+	 (adjoin (make-tlv (usocket:host-byte-order (config-host-address *config*)) :tlv-type :path) (tlv tlv-block))
+	 (generate-message :msg-type :node-beacon :tlv-type :path :tlv tlv-block))
 	(t nil))
       (rcvlog (format nil "MSG: ~A" rcv)))))
 
@@ -192,7 +193,7 @@
 ----- Duplicate Set ----~%
 ~A~%
 ------ Link Set -----~%
-~A~%" *routing-table* (print-hash *duplicate-set*) (print-hash *link-set*))))
+~A~%" (print-hash *routing-table*) (print-hash *duplicate-set*) (print-hash *link-set*))))
 
 (defun rcvlog (&rest rest)
   (with-open-file (s (merge-pathnames "received" (user-homedir-pathname)) :direction :output
