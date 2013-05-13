@@ -9,8 +9,11 @@
 
 (cffi:use-foreign-library libioct)
 
-(defun modify_route (gw dst mask op)
-  (cffi:foreign-funcall "modify_route" :string gw
-			:string dst
-			:string mask
-			:string op))
+(defun modify-route (gw dst mask op)
+  (cffi:foreign-funcall "modify_route" :string gw :string dst :string mask :string op))
+
+(defun add-route (gw dst mask)
+  (modify-route gw dst mask "SIOCADDRT"))
+
+(defun del-route (gw dst mask)
+  (modify-route gw dst mask "SIOCDELRT"))
