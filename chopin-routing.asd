@@ -6,6 +6,7 @@
   :author "Your Name <your.name@example.com>"
   :license "Specify license here"
   :depends-on (#:sb-concurrency
+	       #+unix #:cffi
 	       #+darwin #:lispbuilder-sdl
 	       #:ironclad
 	       #:usocket
