@@ -19,6 +19,7 @@
 	       (:file "serialization")
 	       (:file "udp-server")
 	       (:file "daemon")
+	       #+unix (:file "kernel-table")
 	       #+darwin (:file "context")
 	       #+darwin (:file "viewer")))
 
