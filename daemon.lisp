@@ -11,7 +11,7 @@
 (defparameter *msg-seq-num* 0) ; wrap-around is 65535
 (defparameter *pkt-seq-num* 0) ; same here
 
-(defparameter *base-station-p* t)
+(defparameter *base-station-p* nil)
 
 (defparameter *msg-types* '(:base-station-beacon 1 :node-beacon 2))
 (defparameter *tlv-types* '(:relay 1 :path 2))
@@ -22,7 +22,7 @@
 (defparameter *link-set* (make-hash-table :test 'equal))
 (defparameter *routing-table* (make-hash-table :test 'equal))
 
-;; Object factories
+;; Object Factories
 
 (defun make-pkt-header ()
   (make-instance 'pkt-header :pkt-seq-num (incf *pkt-seq-num*)))
@@ -62,11 +62,11 @@
     (setf (msg-size msg-header) (userial:buffer-length))
     (make-packet :msg-header msg-header :tlv-block tlv-block)))
 
-(defun generate-message (&key msg-header tlv (msg-type :base-station-beacon) (tlv-type :relay)
+(defun generate-message (&key msg-header (msg-type :base-station-beacon) (tlv-type :relay)
 			   (tlv-values (list (config-host-address *config*))))
   (let* ((msg-header (or msg-header (make-msg-header :msg-type msg-type)))
 	 (tlvs (build-tlvs tlv-values :tlv-type tlv-type))
-	 (tlv-block (or tlv (make-tlv-block tlvs))))
+	 (tlv-block (make-tlv-block tlvs)))
     (sb-concurrency:enqueue (build-packet msg-header tlv-block) *out-buffer*)))
 
 (defun message-hash (field1 field2)
@@ -100,7 +100,7 @@
   (with-slots (msg-orig-addr msg-seq-num msg-hop-count) msg-header
     (with-slots (tlv) tlv-block
       (let ((destination (value (first (last tlv)))))
-	(setf (gethash (message-hash destination msg-orig-addr) *routing-table*)
+	(setf (gethash (message-hash destination destination) *routing-table*)
 	      (make-rt-entry :destination (usocket:hbo-to-dotted-quad destination)
 			     :next-hop tlv :hop-count msg-hop-count :seq-num msg-seq-num))))))
 
@@ -122,10 +122,12 @@
 	((= msg-type (getf *msg-types* :base-station-beacon)) ; forward with unchanged content - BROADCAST
 	 (setf orig-addr (usocket:host-byte-order (config-host-address *config*))))
 	((and (= msg-type (getf *msg-types* :node-beacon)) (not *base-station-p*)) ; append current node address and forward to next-hop towards base station - UNICAST
-	 (adjoin (make-tlv (usocket:host-byte-order (config-host-address *config*)) :tlv-type :path) (tlv tlv-block))
-	 (generate-message :msg-type :node-beacon :tlv-type :path :tlv tlv-block))
+	 (generate-message :msg-type :node-beacon :tlv-type :path :tlv-values
+			   `(,(config-host-address *config*)
+			      ,@(mapcar #'(lambda (entry)
+					    (usocket:hbo-to-dotted-quad (value entry))) (tlv tlv-block)))))
 	(t nil))
-      (rcvlog (format nil "MSG: ~A" rcv)))))
+      (rcvlog (format nil "SEQ NUM: ~A MSG: ~A" (msg-seq-num msg-header) rcv)))))
 
 (defun retrieve-message (buffer size)
   "Unserialize the message and check if it should be processed."
@@ -139,9 +141,7 @@
 	  ((equal (usocket:hbo-to-dotted-quad orig-addr) (config-host-address *config*)) nil) ; discard
 	  ((check-duplicate-set orig-addr seq-num) (format nil "~A" (dt:now))) ; discard
 	  ((not (member msg-type *msg-types*)) nil) ;discard
-	  (t (progn
-	       (rcvlog (format nil "(~A) len: ~A src: ~A" size (length buffer) (usocket:hbo-to-dotted-quad orig-addr)))
-	       (process-message pkt-header msg-header tlv-block))))))))
+	  (t (process-message pkt-header msg-header tlv-block)))))))
 
 (defun out-buffer-get ()
   (let ((packet (sb-concurrency:dequeue *out-buffer*)))
