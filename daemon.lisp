@@ -85,9 +85,11 @@
 	 (ref-interval (config-refresh-interval *config*))
 	 (neighb-holding (config-neighb-hold-time *config*))
 	 (l-time (dt:second+ (dt:now) (* neighb-holding ref-interval)))
-	 (ls-hash (message-hash local-addr msg-orig-addr)))
-    (unless (gethash ls-hash *link-set*) ;; stopped here. Validity time from OSLR makes sense. Need to update time when entry already exists
-      (setf (gethash ls-hash *link-set*) (make-instance 'link-tuple :local-addr local-addr :neighbor-addr (usocket:hbo-to-dotted-quad msg-orig-addr) :l-time l-time)))))
+	 (ls-hash (message-hash local-addr msg-orig-addr))
+	 (current-link (gethash ls-hash *link-set*)))
+    (if current-link ;; stopped here. Validity time from OSLR makes sense. Need to update time when entry already exists
+	(setf (l-time current-link) l-time)
+	(setf (gethash ls-hash *link-set*) (make-instance 'link-tuple :local-addr local-addr :neighbor-addr (usocket:hbo-to-dotted-quad msg-orig-addr) :l-time l-time)))))
 
 (defun update-duplicate-set (msg-header)
   (with-slots (msg-type msg-orig-addr msg-seq-num) msg-header
@@ -95,14 +97,20 @@
 	  (make-instance 'duplicate-tuple :orig-addr msg-orig-addr :msg-type msg-type :seq-num msg-seq-num
 			 :exp-time (dt:second+ (dt:now) (config-dup-hold-time *config*))))))
 
+(defun update-kernel-routing-table (destination iface metric)
+  (rcvlog (format nil "KERNEL: iface -> ~A dest -> ~A metric -> ~A" iface (usocket:hbo-to-dotted-quad destination) metric))
+  (add-route (usocket:hbo-to-dotted-quad destination) "0.0.0.0" iface metric))
+
 (defun update-routing-table (msg-header tlv-block)
   "TODO: Need to filter bogus destinations, such as 0.0.0.0"
   (with-slots (msg-orig-addr msg-seq-num msg-hop-count) msg-header
     (with-slots (tlv) tlv-block
       (let ((destination (value (first (last tlv)))))
-	(setf (gethash (message-hash destination destination) *routing-table*)
-	      (make-rt-entry :destination (usocket:hbo-to-dotted-quad destination)
-			     :next-hop tlv :hop-count msg-hop-count :seq-num msg-seq-num))))))
+	(unless (zerop destination)
+	  (setf (gethash (message-hash destination destination) *routing-table*)
+		(make-rt-entry :destination (usocket:hbo-to-dotted-quad destination)
+			       :next-hop tlv :hop-count msg-hop-count :seq-num msg-seq-num))
+	  (update-kernel-routing-table destination (config-interface *config*) msg-hop-count))))))
 
 (defun process-message (pkt-header msg-header tlv-block)
   (with-accessors ((msg-type msg-type) (orig-addr msg-orig-addr) (seq-num msg-seq-num) (hop-count msg-hop-count) (hop-limit msg-hop-limit)) msg-header

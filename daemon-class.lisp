@@ -1,7 +1,7 @@
 ;;; -*- Mode: Lisp -*-
 (in-package :chopin-routing)
 
-(defstruct config host-address broadcast-address port hop-limit refresh-interval dup-hold-time neighb-hold-time timer-repeat-interval)
+(defstruct config interface host-address broadcast-address port hop-limit refresh-interval dup-hold-time neighb-hold-time timer-repeat-interval)
 
 (defstruct rt-entry destination next-hop hop-count seq-num)
 
