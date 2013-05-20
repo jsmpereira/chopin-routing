@@ -28,8 +28,7 @@
   (let ((buffer (make-array 32 :element-type '(unsigned-byte 8) :fill-pointer 0 :adjustable t)))
     (loop
      (multiple-value-bind (buf size host port)
-	 (usocket:socket-receive socket buffer nil)
-       (rcvlog (format nil "---> ~A" size))
+	 (usocket:socket-receive socket buffer (length buffer))
        (retrieve-message buf size)))))
 
 (defun writer (socket)

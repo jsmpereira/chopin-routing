@@ -66,12 +66,17 @@
     (make-packet :msg-header msg-header :tlv-block tlv-block)))
 
 (defun generate-message (&key msg-header (msg-type :base-station-beacon) (tlv-type :relay)
-			   (tlv-values (list (config-host-address *config*))))
+			   tlv-block (tlv-values (list (config-host-address *config*))))
   "Enqueue `packet' in *OUT-BUFFER*."
   (let* ((msg-header (or msg-header (make-msg-header :msg-type msg-type)))
-	 (tlvs (build-tlvs tlv-values :tlv-type tlv-type))
-	 (tlv-block (make-tlv-block tlvs)))
-    (sb-concurrency:enqueue (build-packet msg-header tlv-block) *out-buffer*)))
+	 (tlvs (unless tlv-block (build-tlvs tlv-values :tlv-type tlv-type)))
+	 (tlvblock (or tlv-block (make-tlv-block tlvs))))
+    (with-accessors ((orig-addr msg-orig-addr) (hop-count msg-hop-count) (hop-limit msg-hop-limit)) msg-header
+      (setf orig-addr (usocket:host-byte-order (config-host-address *config*)))
+      (incf hop-count)
+      (decf hop-limit)
+      (rcvlog (format nil "[~A] ****** OUT ****** ~A ~A" (usocket:hbo-to-dotted-quad orig-addr) tlvs tlv-values)))
+    (sb-concurrency:enqueue (build-packet msg-header tlvblock) *out-buffer*)))
 
 (defun message-hash (&rest rest)
   "Generate hash key based on passed arguments."
@@ -125,7 +130,7 @@
 	(unless (or (zerop destination) (string= (usocket:hbo-to-dotted-quad destination) (config-host-address *config*)))
 	  (setf (gethash (message-hash destination destination) *routing-table*)
 		(make-rt-entry :destination (usocket:hbo-to-dotted-quad destination)
-			       :next-hop tlv :hop-count msg-hop-count :seq-num msg-seq-num))
+			       :next-hop tlv :hop-count (1+ msg-hop-count) :seq-num msg-seq-num))
 	  #-darwin(update-kernel-routing-table destination (config-interface *config*) msg-hop-count))))))
 
 ;;--- TODO(jsmpereira@gmail.com): Refactor! This can be more readable and maybe do less.
@@ -137,26 +142,22 @@
     ;; Base Station sends :relay messages to inform the nodes of its presence
     ;; Nodes send :path messages to inform base station of their presence
     (let* ((link-tuple (update-link-set orig-addr))
-	  (duplicate-tuple (update-duplicate-set msg-header))
-	  (rcv (format nil "~A DUP --> exp-time: ~A | hop-count: ~A msg-type: ~A orig-addr: ~A seq-num: ~A content: ~A~%" (dt:now) (slot-value duplicate-tuple 'exp-time)
-	      hop-count msg-type (usocket:hbo-to-dotted-quad orig-addr) seq-num (tlv tlv-block)))) ; add message to duplicate set
+	   (duplicate-tuple (update-duplicate-set msg-header)))
+      (rcvlog (format nil "[~A] ****** IN ******** ~% DUP --> exp-time: ~A | hop-count: ~A msg-type: ~A seq-num: ~A content: ~A~%" (usocket:hbo-to-dotted-quad orig-addr) (slot-value duplicate-tuple 'exp-time) hop-count msg-type seq-num (tlv tlv-block))) ; add message to duplicate set
       (cond
 	;; Forward with unchanged content: BROADCAST
 	((= msg-type (getf *msg-types* :base-station-beacon))
-	 (setf orig-addr (usocket:host-byte-order (config-host-address *config*)))
-	 (rcvlog (format nil "~A FORWARding BS Beacon" orig-addr))
-	 ;(generate-message :msg-type msg-type :tlv-type :relay)
-	 )
+	 (rcvlog (format nil "~A FORWARding BS Beacon" (usocket:hbo-to-dotted-quad orig-addr)))
+	 (generate-message :msg-header msg-header :msg-type msg-type :tlv-type :relay :tlv-block tlv-block))
 	;; Append current node address and forward to next-hop towards base station: UNICAST
-	((and (= msg-type (getf *msg-types* :node-beacon)) (not *base-station-p*))
-	 (incf hop-count) ; maybe check here if incf/decf values result in packet drop?
-	 (decf hop-limit)
-	 (generate-message :msg-header msg-header :msg-type msg-type :tlv-type :path :tlv-values
-			   `(,(config-host-address *config*)
-			      ,@(mapcar #'(lambda (entry)
-					    (usocket:hbo-to-dotted-quad (value entry))) (tlv tlv-block)))))
-	(t nil))
-      (rcvlog (format nil "SEQ NUM: ~A MSG: ~A" (msg-seq-num msg-header) rcv)))))
+	;; ((and (= msg-type (getf *msg-types* :node-beacon)) (not *base-station-p*))
+	;;  (incf hop-count) ; maybe check here if incf/decf values result in packet drop?
+	;;  (decf hop-limit)
+	;;  (generate-message :msg-header msg-header :msg-type msg-type :tlv-type :path :tlv-values
+	;; 		   `(,(config-host-address *config*)
+	;; 		      ,@(mapcar #'(lambda (entry)
+	;; 				    (usocket:hbo-to-dotted-quad (value entry))) (tlv tlv-block)))))
+	(t (rcvlog (format nil "!!!! THIS SHOULD NOT BE REACHED!!!!!")))))))
 
 (defun retrieve-message (buffer size)
   "Unserialize BUFFER and into PKT-HEADER, MSG-HEADER and TLV-BLOCK. Parse MSG-HEADER according to RFC 5444."
@@ -167,9 +168,9 @@
 	(cond
 	  ((= hop-limit 0) nil) ; discard
 	  ((= hop-count 255) nil) ; discard
-	  ((equal (usocket:hbo-to-dotted-quad orig-addr) (config-host-address *config*)) nil) ; discard
-	  ((check-duplicate-set orig-addr seq-num) (format nil "~A" (dt:now))) ; discard
-	  ((not (member msg-type *msg-types*)) nil) ;discard
+	  ((equal (usocket:hbo-to-dotted-quad orig-addr) (config-host-address *config*)) (rcvlog (format nil "TALKING TO SELF"))) ; discard
+	  ((check-duplicate-set orig-addr seq-num) (rcvlog (format nil "DUPLICATE"))) ; discard
+	  ((not (member msg-type *msg-types*)) (rcvlog (format nil "UNRECOGNIZED TYPE"))) ;discard
 	  (t (process-message pkt-header msg-header tlv-block)))))))
 
 (defun out-buffer-get ()
