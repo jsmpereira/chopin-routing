@@ -84,18 +84,25 @@
   "Return T if *DUPLICATE-SET* contains an entry for MSG-TYPE and ORIG-ADDR. Otherwise, return NIL."
   (gethash (message-hash msg-type orig-addr) *duplicate-set*))
 
+(defun link-set-params ()
+  (values
+   (config-host-address *config*)
+   (config-refresh-interval *config*)
+   (config-neighb-hold-time *config*)))
+
+;(config-params :host-address :refresh-interval :neighb-hold-time)
+
 ;;--- TODO(jsmpereira@gmail.com): When updating Link Set need to rebuild routing table.
 (defun update-link-set (msg-orig-addr)
   "Add or update *LINK-SET* entry. For an existing entry update L-TIME. Otherwise, create new `link-tuple'."
-  (let* ((local-addr (config-host-address *config*))
-	 (ref-interval (config-refresh-interval *config*))
-	 (neighb-holding (config-neighb-hold-time *config*))
-	 (l-time (dt:second+ (dt:now) (* neighb-holding ref-interval)))
-	 (ls-hash (message-hash local-addr msg-orig-addr))
-	 (current-link (gethash ls-hash *link-set*)))
-    (if current-link ; stopped here. Validity time from OSLR makes sense. Need to update time when entry already exists
-	(setf (l-time current-link) l-time)
-	(setf (gethash ls-hash *link-set*) (make-instance 'link-tuple :local-addr local-addr :neighbor-addr (usocket:hbo-to-dotted-quad msg-orig-addr) :l-time l-time)))))
+  (multiple-value-bind (local-addr ref-interval neighb-holding)
+      (link-set-params)
+    (let* ((l-time (dt:second+ (dt:now) (* neighb-holding ref-interval)))
+	   (ls-hash (message-hash local-addr msg-orig-addr))
+	   (current-link (gethash ls-hash *link-set*)))
+      (if current-link ; stopped here. Validity time from OSLR makes sense. Need to update time when entry already exists
+	  (setf (l-time current-link) l-time)
+	  (setf (gethash ls-hash *link-set*) (make-instance 'link-tuple :local-addr local-addr :neighbor-addr (usocket:hbo-to-dotted-quad msg-orig-addr) :l-time l-time))))))
 
 (defun update-duplicate-set (msg-header)
   "Create a `duplicate-tuple' from MSG-HEADER to be added to *DUPLICATE-SET*."
@@ -115,7 +122,7 @@
   (with-slots (msg-orig-addr msg-seq-num msg-hop-count) msg-header
     (with-slots (tlv) tlv-block
       (let ((destination (value (first (last tlv)))))
-	(unless (zerop destination)
+	(unless (or (zerop destination) (string= (usocket:hbo-to-dotted-quad destination) (config-host-address *config*)))
 	  (setf (gethash (message-hash destination destination) *routing-table*)
 		(make-rt-entry :destination (usocket:hbo-to-dotted-quad destination)
 			       :next-hop tlv :hop-count msg-hop-count :seq-num msg-seq-num))
@@ -126,9 +133,6 @@
   "Update *ROUTING-TABLE*, *DUPLICATE-SET* and *LINK-SET*. If MSG-TYPE is :BASE-STATION-BEACON broadcast. If MSG-TYPE is :NODE-BEACON unicast to next-hop to Base Station. "
   (with-accessors ((msg-type msg-type) (orig-addr msg-orig-addr) (seq-num msg-seq-num) (hop-count msg-hop-count) (hop-limit msg-hop-limit)) msg-header
     (incf *messages-received*)
-    (unless *base-station-p*
-      (incf hop-count) ; maybe check here if incf/decf values result in packet drop?
-      (decf hop-limit))
     (update-routing-table msg-header tlv-block)
     ;; Base Station sends :relay messages to inform the nodes of its presence
     ;; Nodes send :path messages to inform base station of their presence
@@ -144,8 +148,10 @@
 	 ;(generate-message :msg-type msg-type :tlv-type :relay)
 	 )
 	;; Append current node address and forward to next-hop towards base station: UNICAST
-	((and (= msg-type (getf *msg-types* :node-beacon)) (not *base-station-p*)) 
-	 (generate-message :msg-type msg-type :tlv-type :path :tlv-values
+	((and (= msg-type (getf *msg-types* :node-beacon)) (not *base-station-p*))
+	 (incf hop-count) ; maybe check here if incf/decf values result in packet drop?
+	 (decf hop-limit)
+	 (generate-message :msg-header msg-header :msg-type msg-type :tlv-type :path :tlv-values
 			   `(,(config-host-address *config*)
 			      ,@(mapcar #'(lambda (entry)
 					    (usocket:hbo-to-dotted-quad (value entry))) (tlv tlv-block)))))
@@ -200,6 +206,7 @@
   (dolist (timer (sb-ext:list-all-timers))
     (sb-ext:unschedule-timer timer)))
 
+;;--- TODO(jsmpereira@gmail.com): http://tools.ietf.org/html/rfc5148 Jitter Considerations in MANETs
 (defun jitter (time)
   "Add some noise to TIME."
   (dt:second+ time (- (random (float *max-jitter*)))))

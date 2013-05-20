@@ -5,7 +5,7 @@
 ;; Call shared library libkernel_routes to manage Kernel Routing Table 
 
 (cffi:define-foreign-library libkernel-routes
-  (:unix "~/quicklisp/local-projects/chopin-routing/libkernel_routes.so"))
+  (:unix "~/quicklisp/local-projects/chopin-routing/c/libkernel_routes.so"))
 
 (cffi:use-foreign-library libkernel-routes)
 
