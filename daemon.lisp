@@ -78,6 +78,11 @@
       (rcvlog (format nil "[~A] ****** OUT ****** ~A ~A" (usocket:hbo-to-dotted-quad orig-addr) tlvs tlv-values)))
     (sb-concurrency:enqueue (build-packet msg-header tlvblock) *out-buffer*)))
 
+(defun new-beacon (msg-type)
+  (assert (valid-msg-type-p msg-type))
+  (sb-concurrency:enqueue (build-packet (make-msg-header :msg-type msg-type)
+					(make-tlv-block (build-tlvs (list (config-host-address *config*))))) *out-buffer*))
+
 (defun message-hash (&rest rest)
   "Generate hash key based on passed arguments."
   (ironclad:byte-array-to-hex-string
@@ -198,8 +203,8 @@
   (sb-ext:schedule-timer (sb-ext:make-timer #'check-link-set-validity :thread t) 60 :repeat-interval (* 3 (config-timer-repeat-interval *config*)))
   (sb-ext:schedule-timer (sb-ext:make-timer #'(lambda ()
 						(if *base-station-p*
-						    (generate-message)
-						    (generate-message :msg-type :node-beacon :tlv-type :path)))
+						    (new-beacon :base-station-beacon)
+						    (new-beacon :node-beacon)))
 					    :thread t) 5 :repeat-interval (config-refresh-interval *config*))
   (sb-ext:schedule-timer (sb-ext:make-timer #'screen :thread t) 5 :repeat-interval (config-refresh-interval *config*)))
 
@@ -239,3 +244,6 @@
     (let ((conf (read in)))
       (setf *config* (apply #'make-config conf))))
   (setf *max-jitter* (/ (config-refresh-interval *config*) 4)))
+
+(defun valid-msg-type-p (msg-type)
+  (getf *msg-types* msg-type))
