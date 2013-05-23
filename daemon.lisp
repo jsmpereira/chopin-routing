@@ -121,10 +121,10 @@
 	  (make-instance 'duplicate-tuple :orig-addr msg-orig-addr :msg-type msg-type :seq-num msg-seq-num
 			 :exp-time (dt:second+ (dt:now) (config-dup-hold-time *config*))))))
 
-(defun update-kernel-routing-table (destination iface metric)
+(defun update-kernel-routing-table (destination gateway iface metric)
   "Call ADD-ROUTE foreign function to update OS routing table."
-  (rcvlog (format nil "KERNEL: iface -> ~A dest -> ~A metric -> ~A" iface (usocket:hbo-to-dotted-quad destination) metric))
-  (add-route (usocket:hbo-to-dotted-quad destination) "0.0.0.0" iface metric))
+  (rcvlog (format nil "KERNEL: iface -> ~A dest -> ~A gw -> ~A metric -> ~A" iface (usocket:hbo-to-dotted-quad destination) (usocket:hbo-to-dotted-quad gateway) metric))
+  (add-route (usocket:hbo-to-dotted-quad destination) (usocket:hbo-to-dotted-quad gateway) iface metric))
 
 ;;--- TODO(jsmpereira@gmail.com): Need to filter bogus destinations, such as 0.0.0.0.
 (defun update-routing-table (msg-header tlv-block)
@@ -136,24 +136,28 @@
 	  (setf (gethash (message-hash destination destination) *routing-table*)
 		(make-rt-entry :destination (usocket:hbo-to-dotted-quad destination)
 			       :next-hop tlv :hop-count (1+ msg-hop-count) :seq-num msg-seq-num))
-	  #-darwin(update-kernel-routing-table destination (config-interface *config*) msg-hop-count))))))
+	  #-darwin
+	  (rcvlog (format nil "~A ~A" (usocket:hbo-to-dotted-quad msg-orig-addr) (usocket:hbo-to-dotted-quad destination)))
+	  (if (= msg-orig-addr destination)
+	      (update-kernel-routing-table destination 0 (config-interface *config*) (1+ msg-hop-count))
+	      (update-kernel-routing-table destination msg-orig-addr (config-interface *config*) (1+ msg-hop-count))))))))
 
 ;;--- TODO(jsmpereira@gmail.com): Refactor! This can be more readable and maybe do less.
 (defun process-message (pkt-header msg-header tlv-block)
   "Update *ROUTING-TABLE*, *DUPLICATE-SET* and *LINK-SET*. If MSG-TYPE is :BASE-STATION-BEACON broadcast. If MSG-TYPE is :NODE-BEACON unicast to next-hop to Base Station. "
   (with-accessors ((msg-type msg-type) (orig-addr msg-orig-addr) (seq-num msg-seq-num) (hop-count msg-hop-count) (hop-limit msg-hop-limit)) msg-header
+    (rcvlog (format nil "[~A] ****** IN ******** ~% hop-count: ~A msg-type: ~A seq-num: ~A content: ~A~%" (usocket:hbo-to-dotted-quad orig-addr) hop-count msg-type seq-num (tlv tlv-block))) ; add message to duplicate set
     (incf *messages-received*)
     (update-routing-table msg-header tlv-block)
     ;; Base Station sends :relay messages to inform the nodes of its presence
     ;; Nodes send :path messages to inform base station of their presence
     (let* ((link-tuple (update-link-set orig-addr))
 	   (duplicate-tuple (update-duplicate-set msg-header)))
-      (rcvlog (format nil "[~A] ****** IN ******** ~% DUP --> exp-time: ~A | hop-count: ~A msg-type: ~A seq-num: ~A content: ~A~%" (usocket:hbo-to-dotted-quad orig-addr) (slot-value duplicate-tuple 'exp-time) hop-count msg-type seq-num (tlv tlv-block))) ; add message to duplicate set
       (cond
 	;; Forward with unchanged content: BROADCAST
 	((= msg-type (getf *msg-types* :base-station-beacon))
 	 (rcvlog (format nil "~A FORWARding BS Beacon" (usocket:hbo-to-dotted-quad orig-addr)))
-	 (generate-message :msg-header msg-header :msg-type msg-type :tlv-type :relay :tlv-block tlv-block))
+	 (generate-message :msg-header msg-header :msg-type msg-type :tlv-type :relay :tlv-block (make-tlv-block (adjoin (make-tlv (config-host-address *config*)) (tlv tlv-block)))))
 	;; Append current node address and forward to next-hop towards base station: UNICAST
 	;; ((and (= msg-type (getf *msg-types* :node-beacon)) (not *base-station-p*))
 	;;  (incf hop-count) ; maybe check here if incf/decf values result in packet drop?
