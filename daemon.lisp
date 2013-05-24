@@ -79,6 +79,7 @@
     (sb-concurrency:enqueue (build-packet msg-header tlvblock) *out-buffer*)))
 
 (defun new-beacon (msg-type)
+  "Enqueue a beacon in *OUT-BUFFER* given `msg-type'."
   (assert (valid-msg-type-p msg-type))
   (sb-concurrency:enqueue (build-packet (make-msg-header :msg-type msg-type)
 					(make-tlv-block (build-tlvs (list (config-host-address *config*))))) *out-buffer*))
@@ -136,8 +137,8 @@
 	  (setf (gethash (message-hash destination destination) *routing-table*)
 		(make-rt-entry :destination (usocket:hbo-to-dotted-quad destination)
 			       :next-hop tlv :hop-count (1+ msg-hop-count) :seq-num msg-seq-num))
-	  #-darwin
 	  (rcvlog (format nil "~A ~A" (usocket:hbo-to-dotted-quad msg-orig-addr) (usocket:hbo-to-dotted-quad destination)))
+	  #-darwin
 	  (if (= msg-orig-addr destination)
 	      (update-kernel-routing-table destination 0 (config-interface *config*) (1+ msg-hop-count))
 	      (update-kernel-routing-table destination msg-orig-addr (config-interface *config*) (1+ msg-hop-count))))))))
@@ -155,7 +156,7 @@
 	   (duplicate-tuple (update-duplicate-set msg-header)))
       (cond
 	;; Forward with unchanged content: BROADCAST
-	((= msg-type (getf *msg-types* :base-station-beacon))
+	((and (= msg-type (getf *msg-types* :base-station-beacon) (not *base-station-p*)))
 	 (rcvlog (format nil "~A FORWARding BS Beacon" (usocket:hbo-to-dotted-quad orig-addr)))
 	 (generate-message :msg-header msg-header :msg-type msg-type :tlv-type :relay :tlv-block (make-tlv-block (adjoin (make-tlv (config-host-address *config*)) (tlv tlv-block)))))
 	;; Append current node address and forward to next-hop towards base station: UNICAST
