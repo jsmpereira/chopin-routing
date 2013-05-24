@@ -156,7 +156,7 @@
 	   (duplicate-tuple (update-duplicate-set msg-header)))
       (cond
 	;; Forward with unchanged content: BROADCAST
-	((and (= msg-type (getf *msg-types* :base-station-beacon) (not *base-station-p*)))
+	((and (= msg-type (getf *msg-types* :base-station-beacon)) (not *base-station-p*))
 	 (rcvlog (format nil "~A FORWARding BS Beacon" (usocket:hbo-to-dotted-quad orig-addr)))
 	 (generate-message :msg-header msg-header :msg-type msg-type :tlv-type :relay :tlv-block (make-tlv-block (adjoin (make-tlv (config-host-address *config*)) (tlv tlv-block)))))
 	;; Append current node address and forward to next-hop towards base station: UNICAST
