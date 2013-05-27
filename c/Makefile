@@ -2,7 +2,7 @@ CFLAGS := -fPIC -g -Wall -Werror
 CC := gcc
 NAME := kernel_routes
 
-all: $(NAME) lib
+all: lib
 
 $(NAME): $(NAME).o
 	$(CC) $(CFLAGS) $^ -o $@

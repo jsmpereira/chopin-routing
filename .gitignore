@@ -1,3 +1,5 @@
 *.fasl
 *~
 .config
+*.o
+*.so
