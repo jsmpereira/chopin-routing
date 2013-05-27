@@ -30,6 +30,8 @@ function add_mac(){
 }
 
 function setup_iptables() {
+    echo "Enabling IP FORWARD ..."
+    sudo sysctl -w net.ipv4.ip_forward=1
     echo "---> Setup iptables rules"
     echo "White list MAC addresses"
     add_mac
