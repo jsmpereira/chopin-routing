@@ -45,8 +45,12 @@ function update_source(){
 }
 
 function clock_sync(){
+    echo "---> Halting NTP server ..."
+    sudo service ntp stop
     echo "---> Syncing clock ..."
     sudo ntpdate ntp.ubuntu.com
+    echo "---> Restarting NTP server ..."
+    sudo service ntp start
 }
 
 function ip_address() {
