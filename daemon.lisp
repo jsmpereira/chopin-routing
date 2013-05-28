@@ -160,7 +160,8 @@
 	 (rcvlog (format nil "~A FORWARding BS Beacon" (usocket:hbo-to-dotted-quad orig-addr)))
 	 (generate-message :msg-header msg-header :msg-type msg-type :tlv-type :relay :tlv-block (make-tlv-block (adjoin (make-tlv (config-host-address *config*)) (tlv tlv-block)))))
 	;; Append current node address and forward to next-hop towards base station: UNICAST
-	;; ((and (= msg-type (getf *msg-types* :node-beacon)) (not *base-station-p*))
+	 ((and (= msg-type (getf *msg-types* :node-beacon)) (not *base-station-p*))
+	  (generate-message :msg-header msg-header :msg-type msg-type :tlv-type :relay :tlv-block (make-tlv-block (adjoin (make-tlv (config-host-address *config*)) (tlv tlv-block)))))
 	;;  (incf hop-count) ; maybe check here if incf/decf values result in packet drop?
 	;;  (decf hop-limit)
 	;;  (generate-message :msg-header msg-header :msg-type msg-type :tlv-type :path :tlv-values
@@ -210,8 +211,8 @@
 						(if *base-station-p*
 						    (new-beacon :base-station-beacon)
 						    (new-beacon :node-beacon)))
-					    :thread t) 5 :repeat-interval (config-refresh-interval *config*))
-  (sb-ext:schedule-timer (sb-ext:make-timer #'screen :thread t) 5 :repeat-interval (config-refresh-interval *config*)))
+					    :thread t) 0 :repeat-interval (config-refresh-interval *config*))
+  (sb-ext:schedule-timer (sb-ext:make-timer #'screen :thread t) 3 :repeat-interval (config-refresh-interval *config*)))
 
 (defun stop-timers ()
   (dolist (timer (sb-ext:list-all-timers))
