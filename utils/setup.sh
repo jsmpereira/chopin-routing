@@ -72,7 +72,7 @@ function build_config_template() {
     echo "(:interface \"$IFACE\"
  :host-address \"$inet_addr\"
  :broadcast-address \"$bcast_addr\"
- :port 1234
+ :port 269
  :hop-limit 255
  :refresh-interval 5
  :dup-hold-time 30
