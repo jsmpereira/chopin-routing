@@ -44,6 +44,11 @@ function update_source(){
     git pull $PROJECT_REPO
 }
 
+function clock_sync(){
+    echo "---> Syncing clock ..."
+    sudo ntpdate ntp.ubuntu.com
+}
+
 function ip_address() {
     ifconfig $IFACE | grep "inet addr" | awk -F: '{print $2}' | awk '{print $1}' # IP address
 }
@@ -83,8 +88,9 @@ function build_shared_libs(){
 
 IFACE=$1
 
-select option in "Update Source" "Build .config file" "Build Shared Libs" "Setup Topology" "Quit"; do
+select option in "NTP clock sync" "Update Source" "Build .config file" "Build Shared Libs" "Setup Topology" "Quit"; do
 case $option in
+    "NTP clock sync" ) clock_sync;;
     "Update Source" ) update_source;;
     "Build .config file" ) build_config_template;;
     "Build Shared Libs" ) build_shared_libs;;
