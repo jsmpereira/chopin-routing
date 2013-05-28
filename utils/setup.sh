@@ -50,6 +50,9 @@ function ip_address() {
 function broadcast_address() {
     ifconfig $IFACE | grep "inet addr" | awk -F: '{print $3}' | awk '{print $1}' # Bcast address
 }
+function network_address() {
+    ip route | grep $IFACE | awk {'print $1'} | sed -n 2p
+}
 
 function build_config_template() {
     echo "---> Retrieving Inet and Bcast Address on '$IFACE' ..."
