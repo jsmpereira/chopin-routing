@@ -74,7 +74,7 @@
     (with-accessors ((orig-addr msg-orig-addr) (hop-count msg-hop-count) (hop-limit msg-hop-limit)) msg-header
       (incf hop-count)
       (decf hop-limit)
-      (rcvlog (format nil "[~A] ****** OUT ****** ~A ~A" (usocket:hbo-to-dotted-quad (config-host-address *config*)) tlvs tlv-values)))
+      (rcvlog (format nil "[~A] ****** OUT ****** ~A ~A" (config-host-address *config*) tlvs tlv-values)))
     (sb-concurrency:enqueue (build-packet msg-header tlvblock) *out-buffer*)))
 
 (defun new-beacon (msg-type)
