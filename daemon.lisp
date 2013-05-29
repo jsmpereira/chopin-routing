@@ -174,7 +174,7 @@
 	  ((not (valid-tlv-block-p tlv-block)) nil) ; discard
 	  ((= hop-limit 0) nil) ; discard
 	  ((= hop-count 255) nil) ; discard
-	  ((talking-to-self-p orig-addr)) (rcvlog (format nil "TALKING TO SELF"))) ; discard
+	  ((talking-to-self-p orig-addr) (rcvlog (format nil "TALKING TO SELF"))) ; discard
 	  ((check-duplicate-set orig-addr seq-num) (rcvlog (format nil "DUPLICATE"))) ; discard
 	  ((not (member msg-type *msg-types*)) (rcvlog (format nil "UNRECOGNIZED TYPE"))) ;discard
 	  (t (process-message pkt-header msg-header tlv-block)))))))
