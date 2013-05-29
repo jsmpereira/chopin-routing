@@ -175,7 +175,7 @@
 	  ((= hop-limit 0) nil) ; discard
 	  ((= hop-count 255) nil) ; discard
 	  ((host-address-p orig-addr) (rcvlog (format nil "TALKING TO SELF"))) ; discard
-	  ((check-duplicate-set msg-type orig-addr seq-num) (rcvlog (format nil "DUPLICATE"))) ; discard
+	  ((check-duplicate-set msg-type orig-addr) (rcvlog (format nil "DUPLICATE"))) ; discard
 	  ((not (member msg-type *msg-types*)) (rcvlog (format nil "UNRECOGNIZED TYPE"))) ;discard
 	  (t (process-message pkt-header msg-header tlv-block)))))))
 
