@@ -25,6 +25,7 @@
   :description "Chopin Routing Simulator."
   :author "José Santos Martins Pereira <jsmpereira@gmail.com>"
   :license ""
+  :pathname "sim/"
   :depends-on (#:lispbuilder-sdl)
   :components ((:file "package")
 	       (:file "class")

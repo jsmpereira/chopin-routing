@@ -1,6 +1,6 @@
 ;;; -*- Mode: Lisp -*-
 
-(in-package #:chopin-routing)
+(in-package #:chopin-sim)
 
 (defvar *paused* nil)
 (defvar *running* nil)

@@ -1,6 +1,6 @@
 ;;;; chopin-routing.lisp
 
-(in-package #:chopin-routing)
+(in-package #:chopin-sim)
 
 (defparameter *base-station* nil)
 (defparameter *nodes* nil)

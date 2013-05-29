@@ -1,6 +1,9 @@
 ;;; -*- Mode: Lisp -*-
 
-(in-package :chopin-routing)
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (load"/Users/josesantos/quicklisp/local-projects/matlisp-master/build/start.lisp"))
+
+(in-package :chopin-sim)
 ;;;; Connectivity metric
 ;;;; http://www.sciencedirect.com/science/article/pii/S0921889012001753
 

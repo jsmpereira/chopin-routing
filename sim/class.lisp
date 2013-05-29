@@ -1,6 +1,6 @@
 ;;; -*- Mode: Lisp -*-
 
-(in-package :chopin-routing)
+(in-package :chopin-sim)
 
 ;; Table Entry class definition
 (defclass table-entry ()
