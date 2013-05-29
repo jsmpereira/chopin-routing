@@ -108,12 +108,12 @@
   (multiple-value-bind (local-addr ref-interval neighb-holding)
       (link-set-params)
     (let* ((l-time (dt:second+ (dt:now) (* neighb-holding ref-interval)))
-	   (ls-hash (message-hash local-addr msg-orig-addr))
+	   (ls-hash (message-hash local-addr (msg-orig-addr msg-header)))
 	   (current-link (gethash ls-hash *link-set*)))
       (if current-link ; stopped here. Validity time from OSLR makes sense. Need to update time when entry already exists
 	  (setf (l-time current-link) l-time)
 	  (progn
-	    (setf (gethash ls-hash *link-set*) (make-instance 'link-tuple :local-addr local-addr :neighbor-addr (usocket:hbo-to-dotted-quad msg-orig-addr) :l-time l-time))
+	    (setf (gethash ls-hash *link-set*) (make-instance 'link-tuple :local-addr local-addr :neighbor-addr (usocket:hbo-to-dotted-quad (msg-orig-addr msg-header)) :l-time l-time))
 	    (update-routing-table msg-header tlv-block))))))
 
 (defun update-duplicate-set (msg-header)
@@ -134,7 +134,7 @@
     (let ((destination (path-destination tlv-block)))
       (setf (gethash (message-hash destination destination) *routing-table*)
 	    (make-rt-entry :destination (usocket:hbo-to-dotted-quad destination)
-			   :next-hop tlv :hop-count (1+ msg-hop-count) :seq-num msg-seq-num))
+			   :next-hop (tlv tlv-block) :hop-count (1+ msg-hop-count) :seq-num msg-seq-num))
       (rcvlog (format nil "~A ~A" (usocket:hbo-to-dotted-quad msg-orig-addr) (usocket:hbo-to-dotted-quad destination)))
       #-darwin
       (if (= msg-orig-addr destination)
@@ -145,16 +145,16 @@
   "Return NIL if `tlv-block' contains invalid tlvs. An invalid tlv contains the current node address or 0.0.0.0."
   (let ((tlvs (mapcar #'(lambda (x)
 			  (value x)) (tlv tlv-block))))
-    (and (notany #'zerop tlvs) (notany #'current-address-p tlvs))))
+    (and (notany #'zerop tlvs) (notany #'host-address-p tlvs))))
 
 (defun process-message (pkt-header msg-header tlv-block)
   "Update *ROUTING-TABLE*, *DUPLICATE-SET* and *LINK-SET*. If MSG-TYPE is :BASE-STATION-BEACON broadcast. If MSG-TYPE is :NODE-BEACON unicast to next-hop to Base Station. "
   (with-accessors ((msg-type msg-type) (orig-addr msg-orig-addr) (seq-num msg-seq-num) (hop-count msg-hop-count) (hop-limit msg-hop-limit)) msg-header
     (rcvlog (format nil "[~A] ****** IN ******** ~% hop-count: ~A msg-type: ~A seq-num: ~A content: ~A~%" (usocket:hbo-to-dotted-quad orig-addr) hop-count msg-type seq-num (tlv tlv-block)))
     (incf *messages-received*)
-    (let* ((link-tuple (update-link-set msg-header tlv-block))
-	   (duplicate-tuple (update-duplicate-set msg-header))
-	   (new-tlv-block (make-tlv-block (adjoin (make-tlv (config-host-address *config*)) (tlv tlv-block)))))
+    (update-link-set msg-header tlv-block)
+    (update-duplicate-set msg-header)
+    (let ((new-tlv-block (make-tlv-block (adjoin (make-tlv (config-host-address *config*)) (tlv tlv-block)))))
       (unless *base-station-p* ; Base Station does not forward messages
 	(cond
 	  ((and (= msg-type (getf *msg-types* :base-station-beacon)))
