@@ -103,7 +103,7 @@
 ;(config-params :host-address :refresh-interval :neighb-hold-time)
 
 ;;--- TODO(jsmpereira@gmail.com): When updating Link Set need to rebuild routing table.
-(defun update-link-set (msg-orig-addr)
+(defun update-link-set (msg-header tlv-block)
   "Add or update *LINK-SET* entry. For an existing entry update L-TIME. Otherwise, create new `link-tuple'."
   (multiple-value-bind (local-addr ref-interval neighb-holding)
       (link-set-params)
@@ -112,7 +112,9 @@
 	   (current-link (gethash ls-hash *link-set*)))
       (if current-link ; stopped here. Validity time from OSLR makes sense. Need to update time when entry already exists
 	  (setf (l-time current-link) l-time)
-	  (setf (gethash ls-hash *link-set*) (make-instance 'link-tuple :local-addr local-addr :neighbor-addr (usocket:hbo-to-dotted-quad msg-orig-addr) :l-time l-time))))))
+	  (progn
+	    (setf (gethash ls-hash *link-set*) (make-instance 'link-tuple :local-addr local-addr :neighbor-addr (usocket:hbo-to-dotted-quad msg-orig-addr) :l-time l-time))
+	    (update-routing-table msg-header tlv-block))))))
 
 (defun update-duplicate-set (msg-header)
   "Create a `duplicate-tuple' from MSG-HEADER to be added to *DUPLICATE-SET*."
@@ -130,22 +132,15 @@
 (defun update-routing-table (msg-header tlv-block)
   "Create `rt-entry' and add to *ROUTING-TABLE*. DESTINATION is the last of the TLV values in TLV-BLOCK."
   (with-slots (msg-orig-addr msg-seq-num msg-hop-count) msg-header
-    (with-slots (tlv) tlv-block
-      (let ((destination (value (first (last tlv)))))
-	(unless (or (zerop destination) (string= (usocket:hbo-to-dotted-quad destination) (config-host-address *config*)))
-	  (setf (gethash (message-hash destination destination) *routing-table*)
-		(make-rt-entry :destination (usocket:hbo-to-dotted-quad destination)
-			       :next-hop tlv :hop-count (1+ msg-hop-count) :seq-num msg-seq-num))
-	  (rcvlog (format nil "~A ~A" (usocket:hbo-to-dotted-quad msg-orig-addr) (usocket:hbo-to-dotted-quad destination)))
-	  #-darwin
-	  (if (= msg-orig-addr destination)
-	      (update-kernel-routing-table destination 0 (config-interface *config*) (1+ msg-hop-count))
-	      (update-kernel-routing-table destination msg-orig-addr (config-interface *config*) (1+ msg-hop-count))))))))
-
-(defun path-to-me-p (tlv-block)
-  "Checks if `tlv-block' contains a path to current node."
-  (let ((destination (value (first (last (tlv tlv-block))))))
-    (string= (usocket:hbo-to-dotted-quad destination) (config-host-address *config*))))
+    (let ((destination (path-destination tlv-block)))
+      (setf (gethash (message-hash destination destination) *routing-table*)
+	    (make-rt-entry :destination (usocket:hbo-to-dotted-quad destination)
+			   :next-hop tlv :hop-count (1+ msg-hop-count) :seq-num msg-seq-num))
+      (rcvlog (format nil "~A ~A" (usocket:hbo-to-dotted-quad msg-orig-addr) (usocket:hbo-to-dotted-quad destination)))
+      #-darwin
+      (if (= msg-orig-addr destination)
+	  (update-kernel-routing-table destination 0 (config-interface *config*) (1+ msg-hop-count))
+	  (update-kernel-routing-table destination msg-orig-addr (config-interface *config*) (1+ msg-hop-count))))))
 
 (defun valid-tlv-block-p (tlv-block)
   "Return NIL if `tlv-block' contains invalid tlvs."

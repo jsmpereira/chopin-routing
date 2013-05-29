@@ -91,6 +91,11 @@
    :tlvs-length 0
    :tlv nil))
 
+(defmethod path-destination ((tlv-block tlv-block))
+  "Return last element of `tlv-block'."
+  (with-slots (tlv) tlv-block
+    (value (first (last tlv)))))
+
 (defclass tlv ()
   ((tlv-type :initarg :tlv-type
 	     :accessor tlv-type
