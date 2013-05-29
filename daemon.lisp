@@ -174,8 +174,8 @@
 	  ((not (valid-tlv-block-p tlv-block)) nil) ; discard
 	  ((= hop-limit 0) nil) ; discard
 	  ((= hop-count 255) nil) ; discard
-	  ((talking-to-self-p orig-addr) (rcvlog (format nil "TALKING TO SELF"))) ; discard
-	  ((check-duplicate-set orig-addr seq-num) (rcvlog (format nil "DUPLICATE"))) ; discard
+	  ((host-address-p orig-addr) (rcvlog (format nil "TALKING TO SELF"))) ; discard
+	  ((check-duplicate-set msg-type orig-addr seq-num) (rcvlog (format nil "DUPLICATE"))) ; discard
 	  ((not (member msg-type *msg-types*)) (rcvlog (format nil "UNRECOGNIZED TYPE"))) ;discard
 	  (t (process-message pkt-header msg-header tlv-block)))))))
 
@@ -249,6 +249,6 @@
 (defun valid-msg-type-p (msg-type)
   (getf *msg-types* msg-type))
 
-(defun current-address-p (orig-addr)
+(defun host-address-p (orig-addr)
   "Return T if ORIG-ADDR equals current node address. Otherwise return NIL."
   (string= (usocket:hbo-to-dotted-quad orig-addr) (config-host-address *config*)))
