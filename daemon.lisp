@@ -72,7 +72,6 @@
 	 (tlvs (unless tlv-block (build-tlvs tlv-values :tlv-type tlv-type)))
 	 (tlvblock (or tlv-block (make-tlv-block tlvs))))
     (with-accessors ((orig-addr msg-orig-addr) (hop-count msg-hop-count) (hop-limit msg-hop-limit)) msg-header
-      (setf orig-addr (usocket:host-byte-order (config-host-address *config*)))
       (incf hop-count)
       (decf hop-limit)
       (rcvlog (format nil "[~A] ****** OUT ****** ~A ~A" (usocket:hbo-to-dotted-quad orig-addr) tlvs tlv-values)))
