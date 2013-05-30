@@ -74,7 +74,7 @@
     (with-accessors ((orig-addr msg-orig-addr) (hop-count msg-hop-count) (hop-limit msg-hop-limit)) msg-header
       (incf hop-count)
       (decf hop-limit)
-      (rcvlog (format nil "[~A] ****** OUT ****** ~A ~A" (config-host-address *config*) tlvs tlv-values)))
+      (rcvlog (format nil "[~A] ****** OUT ****** ~A" (config-host-address *config*) (tlv tlvblock))))
     (sb-concurrency:enqueue (build-packet msg-header tlvblock) *out-buffer*)))
 
 (defun new-beacon (msg-type)
@@ -136,7 +136,7 @@
 			   :next-hop (tlv tlv-block) :hop-count (1+ msg-hop-count) :seq-num msg-seq-num))
       (rcvlog (format nil "~A ~A" (usocket:hbo-to-dotted-quad msg-orig-addr) (usocket:hbo-to-dotted-quad destination)))
       #-darwin
-      (if (= msg-orig-addr destination)
+      (if (= msg-orig-addr (next-hop tlv-block))
 	  (update-kernel-routing-table destination 0 (config-interface *config*) (1+ msg-hop-count))
 	  (update-kernel-routing-table destination (next-hop tlv-block) (config-interface *config*) (1+ msg-hop-count))))))
 
