@@ -11,4 +11,7 @@ sbcl --noinform --eval "(require :swank)" \
      --eval "(swank:create-server :port (parse-integer \"$1\") :style :spawn :dont-close t)" \
      --eval "(ql:quickload :chopin-routing)" \
      --eval "(in-package :chopin-routing)" \
-     --eval "(start-server)"
+     --eval "(push 'kernel-table-cleanup sb-ext:*exit-hooks*)" \
+     --eval "(start-server)" \
+     --noprint \
+     --disable-debugger
