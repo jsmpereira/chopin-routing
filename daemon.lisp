@@ -158,7 +158,7 @@
 	(cond
 	  ((and (= msg-type (getf *msg-types* :base-station-beacon)))
 	   (rcvlog (format nil "~A FORWARding BS Beacon" (usocket:hbo-to-dotted-quad orig-addr)))
-	   (generate-message :msg-header msg-header :msg-type msg-type :tlv-type :relay :tlv-block tlv-block))
+	   (generate-message :msg-header msg-header :msg-type msg-type :tlv-type :relay :tlv-block new-tlv-block))
 	  ((and (= msg-type (getf *msg-types* :node-beacon)))
 	   (generate-message :msg-header msg-header :msg-type msg-type :tlv-type :path :tlv-block new-tlv-block))
 	  (t (rcvlog (format nil "!!!! THIS SHOULD NOT BE REACHED!!!!!"))))))))
