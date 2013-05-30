@@ -239,6 +239,10 @@
 
 ;;; util
 
+(defmacro with-hash (hash &body body)
+  `(loop for k being the hash-keys in ,hash using (hash-value v)
+	 do ,@body))
+
 (defun load-config (&optional (path "quicklisp/local-projects/chopin-routing/.config"))
   (with-open-file (in (merge-pathnames path (user-homedir-pathname)) :direction :input)
     (let ((conf (read in)))
@@ -251,3 +255,8 @@
 (defun host-address-p (orig-addr)
   "Return T if ORIG-ADDR equals current node address. Otherwise return NIL."
   (string= (usocket:hbo-to-dotted-quad orig-addr) (config-host-address *config*)))
+
+(defun kernel-table-cleanup ()
+  "Loop through *ROUTING-TABLE* and cleanup routing entries from Kernel IP table."
+  (with-hash *routing-table*
+    (del-route (rt-entry-destination v) "0" (config-interface *config*) (rt-entry-hop-count v))))
