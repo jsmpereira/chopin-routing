@@ -7,6 +7,9 @@
 # - Generate .config file for protocol
 # - Build shared libs (Netlink)
 # - Setup iptable rules for topology building
+#   - For file based functionality, the script expects a file
+#     named 'mac_whitelist' with one MAC address per line.
+#   - Otherwise interactive input of MAC address is supplied.
 
 PROJECT_REPO=https://github.com/jsmpereira/chopin-routing.git
 
@@ -15,11 +18,15 @@ function usage(){
     exit 1;
 }
 
+function filter_by_mac(){
+    echo "---> Setting up iptables rule ..."
+    sudo iptables -t mangle -A PREROUTING -m mac --mac-source $1 -j ACCEPT;
+}
+
 function add_mac(){
     echo "Enter MAC Address:"
     read MAC
-    echo "---> Setting up iptables rule ..."
-    sudo iptables -t mangle -A PREROUTING -m mac --mac-source $MAC -j ACCEPT;
+    filter_by_mac $MAC
     echo "Add another?"
     select yn in "Yes" "No"; do
     case $yn in
@@ -34,7 +41,14 @@ function setup_iptables() {
     sudo sysctl -w net.ipv4.ip_forward=1
     echo "---> Setup iptables rules"
     echo "White list MAC addresses"
-    add_mac
+    if [ -e "mac_whitelist" ]; then
+	echo "---> Reading from file"
+	cat "mac_whitelist" | while read -e line; do
+	    filter_by_mac $line; 
+	done
+    else
+	add_mac
+    fi
     echo "---> Dropping packets from everyone else on '$IFACE' ..."
     sudo iptables -t mangle -A PREROUTING -i $IFACE -j DROP;
 }
