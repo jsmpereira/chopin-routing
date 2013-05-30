@@ -33,6 +33,7 @@
 
 (defun writer (socket)
   (loop
+   (sleep (random (float *max-jitter*)))
    (let ((out (out-buffer-get)))
      (when out
        (usocket:socket-send socket out (length out) :host (config-broadcast-address *config*) :port (config-port *config*))))
