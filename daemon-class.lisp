@@ -96,6 +96,11 @@
   (with-slots (tlv) tlv-block
     (value (first (last tlv)))))
 
+(defmethod next-hop ((tlv-block tlv-block))
+  "Return next hop on `tlv-block'."
+  (with-slots (tlv) tlv-block
+    (value (first tlv))))
+
 (defclass tlv ()
   ((tlv-type :initarg :tlv-type
 	     :accessor tlv-type

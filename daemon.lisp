@@ -102,7 +102,6 @@
 
 ;(config-params :host-address :refresh-interval :neighb-hold-time)
 
-;;--- TODO(jsmpereira@gmail.com): When updating Link Set need to rebuild routing table.
 (defun update-link-set (msg-header tlv-block)
   "Add or update *LINK-SET* entry. For an existing entry update L-TIME. Otherwise, create new `link-tuple'."
   (multiple-value-bind (local-addr ref-interval neighb-holding)
@@ -110,7 +109,7 @@
     (let* ((l-time (dt:second+ (dt:now) (* neighb-holding ref-interval)))
 	   (ls-hash (message-hash local-addr (msg-orig-addr msg-header)))
 	   (current-link (gethash ls-hash *link-set*)))
-      (if current-link ; stopped here. Validity time from OSLR makes sense. Need to update time when entry already exists
+      (if current-link
 	  (setf (l-time current-link) l-time)
 	  (progn
 	    (setf (gethash ls-hash *link-set*) (make-instance 'link-tuple :local-addr local-addr :neighbor-addr (usocket:hbo-to-dotted-quad (msg-orig-addr msg-header)) :l-time l-time))
@@ -139,7 +138,7 @@
       #-darwin
       (if (= msg-orig-addr destination)
 	  (update-kernel-routing-table destination 0 (config-interface *config*) (1+ msg-hop-count))
-	  (update-kernel-routing-table destination msg-orig-addr (config-interface *config*) (1+ msg-hop-count))))))
+	  (update-kernel-routing-table destination (next-hop tlv-block) (config-interface *config*) (1+ msg-hop-count))))))
 
 (defun valid-tlv-block-p (tlv-block)
   "Return NIL if `tlv-block' contains invalid tlvs. An invalid tlv contains the current node address or 0.0.0.0."
@@ -159,7 +158,7 @@
 	(cond
 	  ((and (= msg-type (getf *msg-types* :base-station-beacon)))
 	   (rcvlog (format nil "~A FORWARding BS Beacon" (usocket:hbo-to-dotted-quad orig-addr)))
-	   (generate-message :msg-header msg-header :msg-type msg-type :tlv-type :relay :tlv-block new-tlv-block))
+	   (generate-message :msg-header msg-header :msg-type msg-type :tlv-type :relay :tlv-block tlv-block))
 	  ((and (= msg-type (getf *msg-types* :node-beacon)))
 	   (generate-message :msg-header msg-header :msg-type msg-type :tlv-type :path :tlv-block new-tlv-block))
 	  (t (rcvlog (format nil "!!!! THIS SHOULD NOT BE REACHED!!!!!"))))))))
