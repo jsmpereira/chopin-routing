@@ -74,7 +74,7 @@
     (with-accessors ((orig-addr msg-orig-addr) (hop-count msg-hop-count) (hop-limit msg-hop-limit)) msg-header
       (incf hop-count)
       (decf hop-limit)
-      (rcvlog (format nil "[~A] ****** OUT ****** ~A" (config-host-address *config*) (tlv tlvblock))))
+      (rcvlog (format nil "ENQUEUE ------------- [~A]" (msg-seq-num msg-header) (tlv tlvblock))))
     (sb-concurrency:enqueue (build-packet msg-header tlvblock) *out-buffer*)))
 
 (defun new-beacon (msg-type)
@@ -124,6 +124,7 @@
 (defun update-kernel-routing-table (destination gateway iface metric)
   "Call ADD-ROUTE foreign function to update OS routing table."
   (rcvlog (format nil "KERNEL: iface -> ~A dest -> ~A gw -> ~A metric -> ~A" iface (usocket:hbo-to-dotted-quad destination) (usocket:hbo-to-dotted-quad gateway) metric))
+  #-darwin
   (add-route (usocket:hbo-to-dotted-quad destination) (usocket:hbo-to-dotted-quad gateway) iface metric))
 
 (defun update-routing-table (msg-header tlv-block)
@@ -134,7 +135,6 @@
 	    (make-rt-entry :destination (usocket:hbo-to-dotted-quad destination)
 			   :next-hop (tlv tlv-block) :hop-count (1+ msg-hop-count) :seq-num msg-seq-num))
       (rcvlog (format nil "~A ~A" (usocket:hbo-to-dotted-quad msg-orig-addr) (usocket:hbo-to-dotted-quad destination)))
-      #-darwin
       (if (= msg-orig-addr (next-hop tlv-block))
 	  (update-kernel-routing-table destination 0 (config-interface *config*) (1+ msg-hop-count))
 	  (update-kernel-routing-table destination (next-hop tlv-block) (config-interface *config*) (1+ msg-hop-count))))))
@@ -166,7 +166,7 @@
   "Unserialize BUFFER and into PKT-HEADER, MSG-HEADER and TLV-BLOCK. Parse MSG-HEADER according to RFC 5444."
   (multiple-value-bind (pkt-header msg-header tlv-block)
       (unserialize-packet buffer)
-    (rcvlog (format nil "<------------- [~A] ~A ~A" (msg-seq-num msg-header) (msg-type msg-header) (usocket:hbo-to-dotted-quad (msg-orig-addr msg-header))))
+    (rcvlog (format nil "<------------- [~A] ~A ~A " (msg-seq-num msg-header) (msg-type msg-header) (usocket:hbo-to-dotted-quad (msg-orig-addr msg-header))))
     (when (= size (length buffer)) ;; read size must match unserialized length
       (with-accessors ((msg-type msg-type) (orig-addr msg-orig-addr) (seq-num msg-seq-num) (hop-limit msg-hop-limit) (hop-count msg-hop-count)) msg-header
 	(cond
@@ -181,8 +181,8 @@
 (defun out-buffer-get ()
   "Dequeue element from *OUT-BUFFER* and serialize it into a PACKET."
   (let ((packet (sb-concurrency:dequeue *out-buffer*)))
-    (when packet
-      (rcvlog (format nil "~%-------------> [~A] ~A BUF: ~A" (msg-seq-num (msg-header (message packet))) (msg-type (msg-header (message packet))) (tlv (tlv-block (message packet)))))
+    (when (and packet (> (length (tlv (tlv-block (message packet)))) 1))
+      (rcvlog (format nil "~%DEQUEUE -------------> [~A] ~A BUF: ~A" (msg-seq-num (msg-header (message packet))) (msg-type (msg-header (message packet))) (tlv (tlv-block (message packet)))))
       (serialize-packet packet))))
 
 ;;; timer / event scheduling
@@ -197,7 +197,10 @@
   "Remote *LINK-SET* entries with expired timestamp."
   (loop for key being the hash-keys in *link-set* using (hash-value val)
 	when (dt:time>= (dt:now) (slot-value val 'l-time))
-	do (remhash key *link-set*)))
+	do (progn
+	     (remhash key *link-set*)
+	     ;(del-route (rt-entry-destination val) "0" (config-interface *config*) (rt-entry-hop-count val))
+	     )))
 
 (defun start-timers ()
   "Setup and start timers."
@@ -260,5 +263,6 @@
 
 (defun kernel-table-cleanup ()
   "Loop through *ROUTING-TABLE* and cleanup routing entries from Kernel IP table."
+  #-darwin
   (with-hash *routing-table*
     (del-route (rt-entry-destination v) "0" (config-interface *config*) (rt-entry-hop-count v))))

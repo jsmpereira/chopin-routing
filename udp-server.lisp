@@ -29,14 +29,16 @@
     (loop
      (multiple-value-bind (buf size host port)
 	 (usocket:socket-receive socket buffer (length buffer))
-       (rcvlog (format nil "~%<------------- ~A" host))
-       (retrieve-message buf size)))))
+       (unless (host-address-p (usocket:host-byte-order host))
+	 (rcvlog (format nil "~%<------------- ~A" host))
+	 (retrieve-message buf size))))))
 
 (defun writer (socket)
   (loop
    (sleep (random (float *max-jitter*)))
    (let ((out (out-buffer-get)))
      (when out
+       (rcvlog (format nil "~%--------------> ~A" out))
        (usocket:socket-send socket out (length out) :host (config-broadcast-address *config*) :port (config-port *config*))))
    (sleep (config-refresh-interval *config*))))
 
