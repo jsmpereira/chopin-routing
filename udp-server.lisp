@@ -29,6 +29,7 @@
     (loop
      (multiple-value-bind (buf size host port)
 	 (usocket:socket-receive socket buffer (length buffer))
+       (rcvlog (format nil "~%<------------- ~A" host))
        (retrieve-message buf size)))))
 
 (defun writer (socket)
