@@ -36,6 +36,11 @@ function add_mac(){
     done
 }
 
+function clean_iptables() {
+    echo "---> Removing iptables rules"
+    sudo iptables -t mangle -F
+}
+
 function setup_iptables() {
     echo "Enabling IP FORWARD ..."
     sudo sysctl -w net.ipv4.ip_forward=1
@@ -106,13 +111,14 @@ function build_shared_libs(){
 
 IFACE=$1
 
-select option in "NTP clock sync" "Update Source" "Build .config file" "Build Shared Libs" "Setup Topology" "Quit"; do
+select option in "NTP clock sync" "Update Source" "Build .config file" "Build Shared Libs" "Setup Topology" "Wipe Topology" "Quit"; do
 case $option in
     "NTP clock sync" ) clock_sync;;
     "Update Source" ) update_source;;
     "Build .config file" ) build_config_template;;
     "Build Shared Libs" ) build_shared_libs;;
     "Setup Topology" ) setup_iptables;;
+    "Wipe Topology" ) clean_iptables;;
     "Quit" ) break;;
     *) echo "Invalid option.";;
 esac
