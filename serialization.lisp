@@ -98,10 +98,9 @@ pkt-header, msg-header and tlv-block."
 
 (defun unserialize-packet (buffer)
   "pkt-header, msg-header, tlvs-length, tlvs"
-  (let ((buff buffer))
-    (userial:with-buffer buff
-      (userial:buffer-rewind)
-      (let* ((pkt-header (unserialize-pkt-header (make-instance 'pkt-header)))
-	     (msg-header (unserialize-msg-header (make-instance 'msg-header)))
-	     (tlv-block (unserialize-tlv-block (make-instance 'tlv-block))))
-	(values pkt-header msg-header tlv-block)))))
+  (userial:with-buffer buffer
+    (userial:buffer-rewind)
+    (let* ((pkt-header (unserialize-pkt-header (make-instance 'pkt-header)))
+	   (msg-header (unserialize-msg-header (make-instance 'msg-header)))
+	   (tlv-block (unserialize-tlv-block (make-instance 'tlv-block))))
+      (values pkt-header msg-header tlv-block))))
