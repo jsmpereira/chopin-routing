@@ -181,7 +181,7 @@
 (defun out-buffer-get ()
   "Dequeue element from *OUT-BUFFER* and serialize it into a PACKET."
   (let ((packet (sb-concurrency:dequeue *out-buffer*)))
-    (when (and packet (> (length (tlv (tlv-block (message packet)))) 1))
+    (when packet
       (rcvlog (format nil "~%DEQUEUE -------------> [~A] ~A BUF: ~A" (msg-seq-num (msg-header (message packet))) (msg-type (msg-header (message packet))) (tlv (tlv-block (message packet)))))
       (serialize-packet packet))))
 
