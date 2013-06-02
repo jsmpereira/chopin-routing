@@ -7,6 +7,8 @@ if [ $# -lt 1 ]; then
     exit 1
 fi
 
+sar -n DEV,EDEV,UDP,TCP 1 -o utils/stats >/dev/null 2>&1 & 
+
 sbcl --noinform --eval "(require :swank)" \
      --eval "(swank:create-server :port (parse-integer \"$1\") :style :spawn :dont-close t)" \
      --eval "(ql:quickload :chopin-routing)" \
@@ -15,3 +17,5 @@ sbcl --noinform --eval "(require :swank)" \
      --eval "(start-server)" \
      --noprint \
      --disable-debugger
+
+sudo killall sar
