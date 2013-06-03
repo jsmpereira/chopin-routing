@@ -30,6 +30,11 @@
   ((pkt-header :initarg :pkt-header :reader pkt-header)
    (message :initarg :message :reader message)))
 
+(defmethod print-object ((object packet) stream)
+  (print-unreadable-object (object stream :type t)
+    (with-slots (message) object
+      (format stream "SEQ: ~A ORIG: ~A BLOCK: ~A" (msg-seq-num (msg-header message)) (usocket:hbo-to-dotted-quad (msg-orig-addr (msg-header message))) (tlv (tlv-block message))))))
+
 (defclass pkt-header ()
   ((version :initarg :version
 	   :accessor version

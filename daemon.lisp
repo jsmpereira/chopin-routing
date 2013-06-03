@@ -241,7 +241,9 @@
 ----- Duplicate Set ----~%
 ~A~%
 ------ Link Set -----~%
-~A~%" (print-hash *routing-table*) (print-hash *duplicate-set*) (print-hash *link-set*))))
+~A~%
+------- OUT BUFFER -----~%
+~A~%" (print-hash *routing-table*) (print-hash *duplicate-set*) (print-hash *link-set*) (sb-concurrency:list-queue-contents *out-buffer*))))
 
 (defun rcvlog (&rest rest)
   (with-open-file (s (merge-pathnames "received" (user-homedir-pathname)) :direction :output
