@@ -90,9 +90,9 @@
 
 ;;; Processing
 
-(defun check-duplicate-set (msg-type orig-addr seq-num)
-  "Return T if *DUPLICATE-SET* contains an entry for MSG-TYPE and ORIG-ADDR. Otherwise, return NIL."
-  (gethash (message-hash msg-type orig-addr seq-num) *duplicate-set*))
+(defun check-duplicate-set (orig-addr seq-num)
+  "Return T if *DUPLICATE-SET* contains an entry for ORIG-ADDR and SEQ-NUM pair. Otherwise, return NIL."
+  (gethash (message-hash orig-addr seq-num) *duplicate-set*))
 
 (defun link-set-params ()
   (values
@@ -117,7 +117,7 @@
 (defun update-duplicate-set (msg-header)
   "Create a `duplicate-tuple' from MSG-HEADER to be added to *DUPLICATE-SET*."
   (with-slots (msg-type msg-orig-addr msg-seq-num) msg-header
-    (setf (gethash (message-hash msg-type msg-orig-addr msg-seq-num) *duplicate-set*)
+    (setf (gethash (message-hash msg-orig-addr msg-seq-num) *duplicate-set*)
 	  (make-instance 'duplicate-tuple :orig-addr msg-orig-addr :msg-type msg-type :seq-num msg-seq-num
 			 :exp-time (dt:second+ (dt:now) (config-dup-hold-time *config*))))))
 
@@ -174,7 +174,7 @@
 	  ((= hop-limit 0) nil) ; discard
 	  ((= hop-count 255) nil) ; discard
 	  ((host-address-p orig-addr) (rcvlog (format nil "TALKING TO SELF"))) ; discard
-	  ((check-duplicate-set msg-type orig-addr seq-num) (rcvlog (format nil "DUPLICATE"))) ; discard
+	  ((check-duplicate-set orig-addr seq-num) (rcvlog (format nil "DUPLICATE"))) ; discard
 	  ((not (member msg-type *msg-types*)) (rcvlog (format nil "UNRECOGNIZED TYPE"))) ;discard
 	  (t (process-message pkt-header msg-header tlv-block)))))))
 
