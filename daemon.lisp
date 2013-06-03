@@ -107,7 +107,7 @@
   (multiple-value-bind (local-addr ref-interval neighb-holding)
       (link-set-params)
     (let* ((l-time (dt:second+ (dt:now) (* neighb-holding ref-interval)))
-	   (ls-hash (message-hash local-addr (msg-orig-addr msg-header)))
+	   (ls-hash (message-hash (msg-orig-addr msg-header)))
 	   (current-link (gethash ls-hash *link-set*)))
       (if current-link
 	  (setf (l-time current-link) l-time)
@@ -131,13 +131,20 @@
   "Create `rt-entry' and add to *ROUTING-TABLE*. DESTINATION is the last of the TLV values in TLV-BLOCK."
   (with-slots (msg-orig-addr msg-seq-num msg-hop-count) msg-header
     (let ((destination (path-destination tlv-block)))
-      (setf (gethash (message-hash destination destination) *routing-table*)
+      (setf (gethash (message-hash destination) *routing-table*)
 	    (make-rt-entry :destination (usocket:hbo-to-dotted-quad destination)
 			   :next-hop (tlv tlv-block) :hop-count (1+ msg-hop-count) :seq-num msg-seq-num))
       (rcvlog (format nil "~A ~A" (usocket:hbo-to-dotted-quad msg-orig-addr) (usocket:hbo-to-dotted-quad destination)))
       (if (= msg-orig-addr (next-hop tlv-block))
 	  (update-kernel-routing-table destination 0 (config-interface *config*) (1+ msg-hop-count))
 	  (update-kernel-routing-table destination (next-hop tlv-block) (config-interface *config*) (1+ msg-hop-count))))))
+
+(defun del-routing-table (destination)
+  (let* ((rt-hash (message-hash (usocket:host-byte-order destination)))
+	 (rt-entry (gethash rt-hash *routing-table*)))
+    (remhash rt-hash *routing-table*)
+    #-darwin
+    (del-route (rt-entry-destination rt-entry) "0" (config-interface *config*) (rt-entry-hop-count rt-entry))))
 
 (defun valid-tlv-block-p (tlv-block)
   "Return NIL if `tlv-block' contains invalid tlvs. An invalid tlv contains the current node address or 0.0.0.0."
@@ -195,12 +202,11 @@
 
 (defun check-link-set-validity ()
   "Remote *LINK-SET* entries with expired timestamp."
-  (loop for key being the hash-keys in *link-set* using (hash-value val)
-	when (dt:time>= (dt:now) (slot-value val 'l-time))
+  (loop for key being the hash-keys in *link-set* using (hash-value link-tuple)
+	when (dt:time>= (dt:now) (slot-value link-tuple 'l-time))
 	do (progn
 	     (remhash key *link-set*)
-	     ;(del-route (rt-entry-destination val) "0" (config-interface *config*) (rt-entry-hop-count val))
-	     )))
+	     (del-routing-table (neighbor-addr link-tuple)))))
 
 (defun start-timers ()
   "Setup and start timers."
