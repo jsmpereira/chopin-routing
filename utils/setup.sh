@@ -3,6 +3,7 @@
 #
 # Script for setting up CHOPIN-ROUTING.
 #
+# - Update clock with NTP
 # - Fetch routing protocol source
 # - Generate .config file for protocol
 # - Build shared libs (Netlink)
@@ -10,6 +11,7 @@
 #   - For file based functionality, the script expects a file
 #     named 'mac_whitelist' with one MAC address per line.
 #   - Otherwise interactive input of MAC address is supplied.
+# - Wipe iptable rules
 
 PROJECT_REPO=https://github.com/CHOPIN-ISR-Coimbra/MANET.git
 
@@ -103,7 +105,7 @@ function build_config_template() {
 function build_shared_libs(){
     echo "---> Building shared libraries ... "
     cd ../c && make clean && make
-    cd ../
+    cd ../utils
 }
 
 # begin
