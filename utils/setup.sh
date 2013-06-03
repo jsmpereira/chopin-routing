@@ -11,7 +11,7 @@
 #     named 'mac_whitelist' with one MAC address per line.
 #   - Otherwise interactive input of MAC address is supplied.
 
-PROJECT_REPO=https://github.com/jsmpereira/chopin-routing.git
+PROJECT_REPO=https://github.com/CHOPIN-ISR-Coimbra/MANET.git
 
 function usage(){
     echo "Usage: $0 <iface>"
