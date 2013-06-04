@@ -37,8 +37,7 @@
    (let ((out (out-buffer-get)))
      (when out
        (rcvlog (format nil "~%--------------> ~A" out))
-       (usocket:socket-send socket out (length out) :host (config-broadcast-address *config*) :port (config-port *config*))))
-   (sleep (config-refresh-interval *config*))))
+       (usocket:socket-send socket out (length out) :host (config-broadcast-address *config*) :port (config-port *config*))))))
 
 (defun stop-server ()
   (setf *out-buffer* (sb-concurrency:make-queue))
