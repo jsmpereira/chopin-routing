@@ -111,8 +111,10 @@
 	   (current-link (gethash ls-hash *link-set*)))
       (if current-link
 	  (setf (l-time current-link) l-time)
-	  (setf (gethash ls-hash *link-set*) (make-instance 'link-tuple :local-addr local-addr :neighbor-addr (usocket:hbo-to-dotted-quad (msg-orig-addr msg-header)) :l-time l-time)))
-      (update-routing-table msg-header tlv-block))))
+	  (progn
+	    (setf (gethash ls-hash *link-set*) (make-instance 'link-tuple :local-addr local-addr
+							      :neighbor-addr (usocket:hbo-to-dotted-quad (msg-orig-addr msg-header)) :l-time l-time))
+	    (update-routing-table msg-header tlv-block))))))
 
 (defun update-duplicate-set (msg-header)
   "Create a `duplicate-tuple' from MSG-HEADER to be added to *DUPLICATE-SET*."
