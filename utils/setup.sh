@@ -95,9 +95,9 @@ function build_config_template() {
  :broadcast-address \"$bcast_addr\"
  :port 269
  :hop-limit 255
- :refresh-interval 5
+ :refresh-interval 2
  :dup-hold-time 30
- :neighb-hold-time 3
+ :neighb-hold-time 6 ; 3 * refresh-interval
  :timer-repeat-interval 10)" > ../.config
     echo "Done."
 }
