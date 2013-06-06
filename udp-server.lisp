@@ -5,6 +5,7 @@
 
 (defvar *writer-thread* nil)
 (defvar *reader-thread* nil)
+(defvar *semaphore* nil)
 (defparameter *broadcast-socket* nil)
 
 (defun start-server ()
@@ -14,6 +15,7 @@
 					:local-port (config-port *config*))))
     (setf (usocket:socket-option socket :broadcast) t)
     (setf *broadcast-socket* socket)
+    (setf *semaphore* (sb-thread:make-semaphore))
     (setf *writer-thread* (bt:make-thread #'(lambda ()
 					      (unwind-protect
 						   (writer socket)
@@ -37,7 +39,9 @@
    (let ((out (out-buffer-get)))
      (when out
        (rcvlog (format nil "~%--------------> ~A" out))
-       (usocket:socket-send socket out (length out) :host (config-broadcast-address *config*) :port (config-port *config*))))))
+       (usocket:socket-send socket out (length out) :host (config-broadcast-address *config*)
+			    :port (config-port *config*))))
+   (sb-thread:wait-on-semaphore *semaphore*)))
 
 (defun stop-server ()
   (setf *out-buffer* (sb-concurrency:make-queue))

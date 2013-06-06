@@ -74,14 +74,16 @@
     (with-accessors ((orig-addr msg-orig-addr) (hop-count msg-hop-count) (hop-limit msg-hop-limit)) msg-header
       (incf hop-count)
       (decf hop-limit)
-      (rcvlog (format nil "ENQUEUE ------------- [~A]" (msg-seq-num msg-header) (tlv tlvblock))))
-    (sb-concurrency:enqueue (build-packet msg-header tlvblock) *out-buffer*)))
+      (rcvlog (format nil "ENQUEUE ------------- [~A] ~A" (msg-seq-num msg-header) (tlv tlvblock))))
+    (sb-concurrency:enqueue (build-packet msg-header tlvblock) *out-buffer*)
+    (sb-thread:signal-semaphore *semaphore*)))
 
 (defun new-beacon (msg-type)
   "Enqueue a beacon in *OUT-BUFFER* given `msg-type'."
   (assert (valid-msg-type-p msg-type))
   (sb-concurrency:enqueue (build-packet (make-msg-header :msg-type msg-type)
-					(make-tlv-block (build-tlvs (list (config-host-address *config*))))) *out-buffer*))
+					(make-tlv-block (build-tlvs (list (config-host-address *config*))))) *out-buffer*)
+  (sb-thread:signal-semaphore *semaphore*))
 
 (defun message-hash (&rest rest)
   "Generate hash key based on passed arguments."
