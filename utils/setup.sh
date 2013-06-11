@@ -20,6 +20,16 @@ function usage(){
     exit 1;
 }
 
+function ip_address() {
+    ifconfig $IFACE | grep "inet addr" | awk -F: '{print $2}' | awk '{print $1}' # IP address
+}
+function broadcast_address() {
+    ifconfig $IFACE | grep "inet addr" | awk -F: '{print $3}' | awk '{print $1}' # Bcast address
+}
+function network_address() {
+    ip route | grep $IFACE | awk {'print $1'} | sed -n 2p
+}
+
 function filter_by_mac(){
     echo "---> Setting up iptables rule ..."
     sudo iptables -t mangle -A PREROUTING -m mac --mac-source $1 -j ACCEPT;
@@ -43,21 +53,36 @@ function clean_iptables() {
     sudo iptables -t mangle -F
 }
 
+function drop_from_all_iptables() {
+    echo "---> Dropping packets from everyone else on '$IFACE' ..."
+    sudo iptables -t mangle -A PREROUTING -i $IFACE -j DROP;
+}
+
 function setup_iptables() {
     echo "Enabling IP FORWARD ..."
     sudo sysctl -w net.ipv4.ip_forward=1
     echo "---> Setup iptables rules"
-    echo "White list MAC addresses"
-    if [ -e "mac_whitelist" ]; then
-	echo "---> Reading from file"
-	cat "mac_whitelist" | while read -e line; do
+    echo "Select Topology:"
+    select top in "1" "2" "3" "4" "5" "Back"; do
+	case $top in
+	    Back ) break;;
+	    *) read_test_file $top;;
+	esac
+    done
+}
+
+function read_test_file() {
+    file="mac_whitelist_$1";
+    if [ -e $file ]; then
+	echo "---> Reading from file for $ip"
+	awk -v ip=$(ip_address) '{ RS= ""; OFS="\n"} $0 ~ ip' $file | awk 'NR>1 {print}' \
+	| while read -e line; do
 	    filter_by_mac $line; 
 	done
     else
 	add_mac
     fi
-    echo "---> Dropping packets from everyone else on '$IFACE' ..."
-    sudo iptables -t mangle -A PREROUTING -i $IFACE -j DROP;
+    drop_from_all_iptables; 
 }
 
 function update_source(){
@@ -72,16 +97,6 @@ function clock_sync(){
     sudo ntpdate ntp.ubuntu.com
     echo "---> Restarting NTP server ..."
     sudo service ntp start
-}
-
-function ip_address() {
-    ifconfig $IFACE | grep "inet addr" | awk -F: '{print $2}' | awk '{print $1}' # IP address
-}
-function broadcast_address() {
-    ifconfig $IFACE | grep "inet addr" | awk -F: '{print $3}' | awk '{print $1}' # Bcast address
-}
-function network_address() {
-    ip route | grep $IFACE | awk {'print $1'} | sed -n 2p
 }
 
 function build_config_template() {
