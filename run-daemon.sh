@@ -1,21 +1,29 @@
-#!/bin/sh -e
+#!/bin/bash
+#
+# <test_number> is for stats file filtering. Not mandatory.
 
-# Create a swank server for now. Actual daemonize process will require more hacking.
-
-if [ $# -lt 1 ]; then
-    echo "Usage: $0 <port>"
+if [ $# -lt 2 ]; then
+    echo "Usage: $0 <{chopin|olsr}> <interface> <test_number>"
     exit 1
 fi
 
-sar -n DEV,EDEV,UDP,TCP,ETCP 1 -o utils/stats >/dev/null 2>&1 & 
+function chopin() {
+    sbcl --noinform --eval "(ql:quickload :chopin-routing)" \
+	--eval "(in-package :chopin-routing)" \
+	--eval "(push 'kernel-table-cleanup sb-ext:*exit-hooks*)" \
+	--eval "(start-server)" \
+	--noprint \
+	--disable-debugger
+}
 
-sbcl --noinform --eval "(require :swank)" \
-     --eval "(swank:create-server :port (parse-integer \"$1\") :style :spawn :dont-close t)" \
-     --eval "(ql:quickload :chopin-routing)" \
-     --eval "(in-package :chopin-routing)" \
-     --eval "(push 'kernel-table-cleanup sb-ext:*exit-hooks*)" \
-     --eval "(start-server)" \
-     --noprint \
-     --disable-debugger
+if [ $1 == "chopin" ]; then
+    func=chopin
+    file=chopin.stats$3
+else
+    func="olsrd -i $2"
+    file=olsr.stats$3
+fi
 
+sar -n DEV,EDEV,UDP,TCP,ETCP 1 -o utils/$file >/dev/null 2>&1 & 
+${func}
 sudo killall sar
