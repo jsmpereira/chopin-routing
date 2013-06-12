@@ -24,6 +24,7 @@ else
     file=olsr.stats$3
 fi
 
-sar -n DEV,EDEV,UDP,TCP,ETCP 1 -o utils/$file >/dev/null 2>&1 & 
+DATE=$(date +"%Y%m%d%H%M%S")
+sar -n DEV,EDEV,UDP,TCP,ETCP 1 -o utils/$DATE.$file >/dev/null 2>&1 & 
 ${func}
 sudo killall sar
