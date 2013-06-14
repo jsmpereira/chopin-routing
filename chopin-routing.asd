@@ -17,7 +17,9 @@
 	       (:file "serialization")
 	       (:file "udp-server")
 	       (:file "daemon")
-	       #-darwin (:file "library")))
+	       #-darwin (:file "library")
+	       (:module utils
+			:components ((:file "gen-topology")))))
 
 #+darwin
 (asdf:defsystem #:chopin-sim
