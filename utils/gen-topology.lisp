@@ -49,11 +49,20 @@
 		  (node-spec 3 2 10)
 		  (node-spec 10 3)))
 
-(defun test3 ()
-  (build-topology 3
+(defun test3.1 ()
+  (build-topology 3.1
 		  (node-spec 5 2 6)
 		  (node-spec 2 5 3)
 		  (node-spec 6 5 7)
 		  (node-spec 7 6 10)
 		  (node-spec 3 2)
 		  (node-spec 10 7)))
+
+(defun test3.2 ()
+  (build-topology 3.2
+		  (node-spec 5 2 6)
+		  (node-spec 2 5 3)
+		  (node-spec 6 5 7)
+		  (node-spec 7 6)
+		  (node-spec 3 2 10)
+		  (node-spec 10 3)))
