@@ -22,6 +22,8 @@
 	collect (gethash (addr node) *mac-addrs*)))
 
 (defun node-spec (node &rest neighbours)
+  (when (zerop (hash-table-count *mac-addrs*))
+    (populate-hash))
   (format nil "~%# ~A (~A)~%~{~A~%~}" (addr node) (gethash (addr node) *mac-addrs*) (get-mac neighbours)))
 
 (defun build-topology (test &rest node-specs)
@@ -46,3 +48,12 @@
 		  (node-spec 2 5 3)
 		  (node-spec 3 2 10)
 		  (node-spec 10 3)))
+
+(defun test3 ()
+  (build-topology 3
+		  (node-spec 5 2 6)
+		  (node-spec 2 5 3)
+		  (node-spec 6 5 7)
+		  (node-spec 7 6 10)
+		  (node-spec 3 2)
+		  (node-spec 10 7)))
