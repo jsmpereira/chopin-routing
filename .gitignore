@@ -3,3 +3,5 @@
 .config
 *.o
 *.so
+utils/2013*
+utils/stats*
