@@ -31,8 +31,9 @@ function network_address() {
 }
 
 function filter_by_mac(){
-    echo "---> Setting up iptables rule ..."
-    sudo iptables -t mangle -A PREROUTING -m mac --mac-source $1 -j ACCEPT;
+    echo "---> Setting up iptables rule ...$2 $1"
+    [[ $2 == "-D" ]] && idx='' || idx=1
+    sudo iptables -t mangle $2 PREROUTING $idx -m mac --mac-source $1 -j ACCEPT;
 }
 
 function add_mac(){
@@ -66,9 +67,23 @@ function setup_iptables() {
     select top in "1" "2" "3.1" "3.2" "5" "Back"; do
 	case $top in
 	    Back ) break;;
+	    "3.2" ) update_test_topology $top;;
 	    *) read_test_file $top;;
 	esac
     done
+}
+
+function update_test_topology () {
+    file="mac_whitelist_$1";
+    out=$(awk -v ip=$(ip_address) '{ RS= ""; OFS="\n"} $0 ~ ip' $file | awk 'NR>1 {print}')
+    mac1=$(echo $out |awk '{print $1}')
+    mac2=$(echo $out |awk '{print $2}')
+    if [ "$mac1" != "NIL" ]; then
+       filter_by_mac $mac1 -I;
+    fi
+    if [ "$mac2" != "NIL" ]; then
+       filter_by_mac $mac2 -D;
+    fi
 }
 
 function read_test_file() {
@@ -77,7 +92,7 @@ function read_test_file() {
 	echo "---> Reading from file for $ip"
 	awk -v ip=$(ip_address) '{ RS= ""; OFS="\n"} $0 ~ ip' $file | awk 'NR>1 {print}' \
 	| while read -e line; do
-	    filter_by_mac $line; 
+	    filter_by_mac $line -I;
 	done
     else
 	add_mac

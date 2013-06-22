@@ -60,9 +60,6 @@
 
 (defun test3.2 ()
   (build-topology 3.2
-		  (node-spec 5 2 6)
-		  (node-spec 2 5 3)
-		  (node-spec 6 5 7)
-		  (node-spec 7 6)
-		  (node-spec 3 2 10)
-		  (node-spec 10 3)))
+		  (node-spec 7 nil 10)
+		  (node-spec 3 10 nil)
+		  (node-spec 10 3 7)))
