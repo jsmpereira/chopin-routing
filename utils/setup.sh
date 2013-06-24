@@ -64,10 +64,10 @@ function setup_iptables() {
     sudo sysctl -w net.ipv4.ip_forward=1
     echo "---> Setup iptables rules"
     echo "Select Topology:"
-    select top in "1" "2" "3.1" "3.2" "5" "Back"; do
+    select top in "1" "2" "3.1" "3.2" "3.3" "5" "Back"; do
 	case $top in
 	    Back ) break;;
-	    "3.2" ) update_test_topology $top;;
+	    "3.2" | "3.3" ) update_test_topology $top;;
 	    *) read_test_file $top;;
 	esac
     done
