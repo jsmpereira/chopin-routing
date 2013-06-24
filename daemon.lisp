@@ -111,7 +111,7 @@
     (let* ((l-time (dt:second+ (dt:now) (* neighb-holding ref-interval)))
 	   (ls-hash (message-hash (msg-orig-addr msg-header)))
 	   (current-link (gethash ls-hash *link-set*)))
-      (if current-link
+      (if (and current-link (equal (neighbor-addr current-link) (next-hop tlv-block)))
 	  (setf (l-time current-link) l-time)
 	  (progn
 	    (setf (gethash ls-hash *link-set*) (make-instance 'link-tuple :local-addr local-addr
