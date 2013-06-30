@@ -214,8 +214,8 @@
 
 (defun start-timers ()
   "Setup and start timers."
-  (sb-ext:schedule-timer (sb-ext:make-timer #'check-duplicate-holding :thread t) 10 :repeat-interval (* 3 (config-refresh-interval *config*)))
-  (sb-ext:schedule-timer (sb-ext:make-timer #'check-link-set-validity :thread t) 10 :repeat-interval (* 3 (config-refresh-interval *config*)))
+  (sb-ext:schedule-timer (sb-ext:make-timer #'check-duplicate-holding :thread t) 10 :repeat-interval (config-dup-hold-time *config*))
+  (sb-ext:schedule-timer (sb-ext:make-timer #'check-link-set-validity :thread t) 10 :repeat-interval (config-neighb-hold-time *config*))
   (sb-ext:schedule-timer (sb-ext:make-timer #'(lambda ()
 						(if *base-station-p*
 						    (new-beacon :base-station-beacon)
