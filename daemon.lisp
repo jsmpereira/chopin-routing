@@ -181,12 +181,12 @@
     (when (= size (length buffer)) ;; read size must match unserialized length
       (with-accessors ((msg-type msg-type) (orig-addr msg-orig-addr) (seq-num msg-seq-num) (hop-limit msg-hop-limit) (hop-count msg-hop-count)) msg-header
 	(cond
-	  ((not (valid-tlv-block-p tlv-block)) nil) ; discard
+	  ((not (member msg-type *msg-types*)) (rcvlog (format nil "UNRECOGNIZED TYPE"))) ;discard
 	  ((= hop-limit 0) nil) ; discard
 	  ((= hop-count 255) nil) ; discard
 	  ((host-address-p orig-addr) (rcvlog (format nil "TALKING TO SELF"))) ; discard
 	  ((check-duplicate-set msg-type orig-addr seq-num) (rcvlog (format nil "DUPLICATE"))) ; discard
-	  ((not (member msg-type *msg-types*)) (rcvlog (format nil "UNRECOGNIZED TYPE"))) ;discard
+	  ((not (valid-tlv-block-p tlv-block)) nil) ; discard
 	  (t (process-message pkt-header msg-header tlv-block)))))))
 
 (defun out-buffer-get ()
