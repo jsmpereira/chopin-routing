@@ -1,6 +1,3 @@
-This is the stub README.txt for the "chopin-routing" project.
+Implementation of a Mobile Ad Hoc Network communication protocol for Human-Robot Search and Rescue Teams.
 
-TODO
-
-* Sequence numbers and counters wrap around
-* Netlink interface
+http://chopin.isr.uc.pt/
