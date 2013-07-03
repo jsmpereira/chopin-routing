@@ -31,14 +31,12 @@
    (multiple-value-bind (buf size host port)
        (usocket:socket-receive socket (make-array 128 :element-type '(unsigned-byte 8) :fill-pointer t) nil)
      (unless (host-address-p (usocket:host-byte-order host))
-       (rcvlog (format nil "~%<------------- ~A ~A ~A" host buf size))
        (retrieve-message buf size)))))
 
 (defun writer (socket)
   (loop
    (let ((out (out-buffer-get)))
      (when out
-       (rcvlog (format nil "~%--------------> ~A" out))
        (usocket:socket-send socket out (length out) :host (config-broadcast-address *config*)
 			    :port (config-port *config*))))
    (sb-thread:wait-on-semaphore *semaphore*)))

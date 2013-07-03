@@ -73,8 +73,7 @@
 	 (tlvblock (or tlv-block (make-tlv-block tlvs))))
     (with-accessors ((orig-addr msg-orig-addr) (hop-count msg-hop-count) (hop-limit msg-hop-limit)) msg-header
       (incf hop-count)
-      (decf hop-limit)
-      (rcvlog (format nil "ENQUEUE ------------- [~A] ~A" (msg-seq-num msg-header) (tlv tlvblock))))
+      (decf hop-limit))
     (sb-concurrency:enqueue (build-packet msg-header tlvblock) *out-buffer*)
     (sb-thread:signal-semaphore *semaphore*)))
 
@@ -127,7 +126,6 @@
 
 (defun update-kernel-routing-table (destination gateway iface metric)
   "Call ADD-ROUTE foreign function to update OS routing table."
-  (rcvlog (format nil "KERNEL: iface -> ~A dest -> ~A gw -> ~A metric -> ~A" iface (usocket:hbo-to-dotted-quad destination) (usocket:hbo-to-dotted-quad gateway) metric))
   #-darwin
   (add-route (usocket:hbo-to-dotted-quad destination) (usocket:hbo-to-dotted-quad gateway) iface metric))
 
@@ -138,7 +136,6 @@
       (setf (gethash (message-hash destination) *routing-table*)
 	    (make-rt-entry :destination (usocket:hbo-to-dotted-quad destination)
 			   :next-hop (tlv tlv-block) :hop-count (1+ msg-hop-count) :seq-num msg-seq-num))
-      (rcvlog (format nil "~A ~A" (usocket:hbo-to-dotted-quad msg-orig-addr) (usocket:hbo-to-dotted-quad destination)))
       (if (= msg-orig-addr (next-hop tlv-block))
 	  (update-kernel-routing-table destination 0 (config-interface *config*) (1+ msg-hop-count))
 	  (update-kernel-routing-table destination (next-hop tlv-block) (config-interface *config*) (1+ msg-hop-count))))))
@@ -159,7 +156,6 @@
 (defun process-message (pkt-header msg-header tlv-block)
   "Update *ROUTING-TABLE*, *DUPLICATE-SET* and *LINK-SET*. If MSG-TYPE is :BASE-STATION-BEACON broadcast. If MSG-TYPE is :NODE-BEACON unicast to next-hop to Base Station. "
   (with-accessors ((msg-type msg-type) (orig-addr msg-orig-addr) (seq-num msg-seq-num) (hop-count msg-hop-count) (hop-limit msg-hop-limit)) msg-header
-    ;(rcvlog (format nil "[~A] ****** IN ******** ~% hop-count: ~A msg-type: ~A seq-num: ~A content: ~A~%" (usocket:hbo-to-dotted-quad orig-addr) hop-count msg-type seq-num (tlv tlv-block)))
     (incf *messages-received*)
     (update-link-set msg-header tlv-block)
     (update-duplicate-set msg-header)
@@ -167,7 +163,6 @@
       (unless *base-station-p* ; Base Station does not forward messages
 	(cond
 	  ((and (= msg-type (getf *msg-types* :base-station-beacon)))
-	   (rcvlog (format nil "~A FORWARding BS Beacon" (usocket:hbo-to-dotted-quad orig-addr)))
 	   (generate-message :msg-header msg-header :msg-type msg-type :tlv-type :relay :tlv-block new-tlv-block))
 	  ((and (= msg-type (getf *msg-types* :node-beacon)))
 	   (generate-message :msg-header msg-header :msg-type msg-type :tlv-type :path :tlv-block new-tlv-block))
@@ -177,7 +172,6 @@
   "Unserialize BUFFER and into PKT-HEADER, MSG-HEADER and TLV-BLOCK. Parse MSG-HEADER according to RFC 5444."
   (multiple-value-bind (pkt-header msg-header tlv-block)
       (unserialize-packet buffer)
-    (rcvlog (format nil "<------------- [~A] ~A ~A " (msg-seq-num msg-header) (msg-type msg-header) (usocket:hbo-to-dotted-quad (msg-orig-addr msg-header))))
     (when (= size (length buffer)) ;; read size must match unserialized length
       (with-accessors ((msg-type msg-type) (orig-addr msg-orig-addr) (seq-num msg-seq-num) (hop-limit msg-hop-limit) (hop-count msg-hop-count)) msg-header
 	(cond
@@ -193,7 +187,6 @@
   "Dequeue element from *OUT-BUFFER* and serialize it into a PACKET."
   (let ((packet (sb-concurrency:dequeue *out-buffer*)))
     (when packet
-      (rcvlog (format nil "~%DEQUEUE -------------> [~A] ~A BUF: ~A" (msg-seq-num (msg-header (message packet))) (msg-type (msg-header (message packet))) (tlv (tlv-block (message packet)))))
       (serialize-packet packet))))
 
 ;;; timer / event scheduling
