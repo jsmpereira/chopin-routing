@@ -34,8 +34,9 @@ fi
 
 DATE=$(date +"%Y%m%d%H%M%S")
 HOST=$(hostname)
-gnome-terminal --tab -e "bash -c \"eval $func;exec bash\"" --tab --title "sar" -e "bash -c \"sar -n DEV,EDEV,UDP,TCP,ETCP 1 -o utils/$DATE.$HOST.$file;exec bash\"" \
+FILENAME=$file.$HOST.$DATE
+gnome-terminal --tab -e "bash -c \"eval $func;exec bash\"" --tab --title "sar" -e "bash -c \"sar -n DEV,EDEV,UDP,TCP,ETCP 1 -o utils/$FILENAME;exec bash\"" \
 --tab --title "routes" -e "bash -c \"while true; do clear; route -n; sleep 2; done\""
 
 echo "Copying stats to Dropbox ..."
-cp utils/2013* ~/Dropbox/TraxBot/chopin-routing-josepereira/
+cp utils/"$FILENAME" ~/Dropbox/TraxBot/chopin-routing-josepereira/
