@@ -63,3 +63,10 @@
 		  (node-spec 7 nil 10)
 		  (node-spec 3 10 nil)
 		  (node-spec 10 3 7)))
+
+(defun test4 ()
+  (build-topology 4
+		  (node-spec 5 2)
+		  (node-spec 2 5 3)
+		  (node-spec 3 2 10)
+		  (node-spec 10 3)))
