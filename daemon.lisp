@@ -134,7 +134,10 @@
 (defun update-routing-table (msg-header tlv-block)
   "Create `rt-entry' and add to *ROUTING-TABLE*. DESTINATION is the last of the TLV values in TLV-BLOCK."
   (with-slots (msg-orig-addr msg-seq-num msg-hop-count) msg-header
-    (let ((destination (path-destination tlv-block)))
+    (let ((destination (path-destination tlv-block))
+	  (current-entry (gethash (message-hash destination) *routing-table*)))
+      (when (and current-entry (<= (1+ msg-hop-count) (rt-entry-hop-count current-entry)))
+	(del-routing-table destination))
       (setf (gethash (message-hash destination) *routing-table*)
 	    (make-rt-entry :destination (usocket:hbo-to-dotted-quad destination)
 			   :next-hop (tlv tlv-block) :hop-count (1+ msg-hop-count) :seq-num msg-seq-num))
