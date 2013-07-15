@@ -53,6 +53,25 @@
 (defun unserialize-msg-header (msg-header)
   (userial:unserialize :msg-header :mh-instance msg-header))
 
+(userial:make-accessor-serializer (:address-block address-block-instance (make-instance 'address-block))
+				  :uint8 num-addr
+				  :uint8 addr-flags
+				  :uint8 head-length)
+
+(userial:make-vector-serializer :head-vector :uint8 3) ; Address head is 192.168.0, length 3
+
+(userial:make-vector-serializer :mid :uint8 1) ; Address mid is x, in 192.168.0.x
+
+(defun serialize-address-block (address-block)
+  (let ((buffer (userial:make-buffer)))
+    (userial:with-buffer buffer
+      (with-slots (head mid) address-block
+	(userial:serialize :address-block address-block)
+	(userial:serialize :head-vector head)
+	(dolist (mid-item mid)
+	  (userial:serialize :mid mid-item))))
+    buffer))
+
 (userial:make-accessor-serializer (:tlv-block tlv-block-instance (make-instance 'tlv-block))
 				  :uint16 tlvs-length)
 

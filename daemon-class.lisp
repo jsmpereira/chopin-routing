@@ -88,6 +88,32 @@
    :msg-hop-count 0
    :msg-seq-num *msg-seq-num*))
 
+(defclass address-block ()
+  ((num-addr :initarg :num-addr :accessor num-addr
+	     :type '(unsigned-byte 8))
+   (addr-flags :initarg :addr-flags :accessor addr-flags
+	       :type '(unsigned-byte 8))
+   (head-length :initarg :head-length :accessor head-length
+		:type '(unsigned-byte 8))
+   (head :initarg :head :accessor head)
+   (mid :initarg :mid :accessor mid))
+  (:default-initargs
+   :addr-flags #b10000000
+   :head-length 3)) ; default is Class C IPv4 Address, netmask 255.255.255.0
+
+(defmethod initialize-instance :after ((addr-block address-block) &key addr-list)
+  (with-slots (num-addr head-length head mid) addr-block
+    (setf num-addr (length addr-list))
+    (setf (values head mid) (address-block-head-mid addr-list head-length))))
+
+(defun address-block-head-mid (addr-list head-length)
+  "Loop throuh `addr-list' and return head-length leftmost octets common to all the addresses and
+and remaining non-common octets of all addresses."
+  (loop for addr in addr-list 
+	for octets = (usocket:integer-to-octet-buffer addr (make-array 4 :element-type '(unsigned-byte 8)) 4)
+	collect (subseq octets head-length) into mid
+	finally (return (values (subseq octets 0 head-length) mid))))
+
 (defclass tlv-block ()
   ((tlvs-length :initarg :tlvs-length :accessor tlvs-length
 		:type '(unsigned-byte 16))
