@@ -98,13 +98,15 @@
    (head :initarg :head :accessor head)
    (mid :initarg :mid :accessor mid))
   (:default-initargs
+   :num-addr nil
    :addr-flags #b10000000
    :head-length 3)) ; default is Class C IPv4 Address, netmask 255.255.255.0
 
 (defmethod initialize-instance :after ((addr-block address-block) &key addr-list)
   (with-slots (num-addr head-length head mid) addr-block
-    (setf num-addr (length addr-list))
-    (setf (values head mid) (address-block-head-mid addr-list head-length))))
+    (when addr-list
+      (setf num-addr (length addr-list))
+      (setf (values head mid) (address-block-head-mid addr-list head-length)))))
 
 (defun address-block-head-mid (addr-list head-length)
   "Loop throuh `addr-list' and return head-length leftmost octets common to all the addresses and

@@ -72,6 +72,14 @@
 	  (userial:serialize :mid mid-item))))
     buffer))
 
+(defun unserialize-address-block (address-block)
+  (let ((addr-block (userial:unserialize :address-block :address-block-instance address-block)))
+    (with-slots (num-addr head mid) addr-block
+      (setf head (userial:unserialize :head-vector))
+      (setf mid (loop repeat num-addr
+		      collect (userial:unserialize :mid))))
+    addr-block))
+
 (userial:make-accessor-serializer (:tlv-block tlv-block-instance (make-instance 'tlv-block))
 				  :uint16 tlvs-length)
 
