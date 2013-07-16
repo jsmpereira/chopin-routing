@@ -17,14 +17,20 @@
       (format stream "~A ~A ~A ~A" msg-type (usocket:hbo-to-dotted-quad orig-addr) seq-num exp-time))))
 
 (defclass link-tuple ()
-  ((local-addr :initarg :local-addr :accessor local-addr)
-   (neighbor-addr :initarg :neighbor-addr :accessor neighbor-addr)
-   (l-time :initarg :l-time :accessor l-time)))
+  ((l-neighbor-iface-addr :initarg :neighbor-iface-addr :accessor l-neighbor-iface-addr)
+   (l-heard-time :initarg :heard-time :accessor l-heard-time)
+   (l-sym-time :initarg :sym-time :accessor l-sym-time)
+   (l-quality :initarg :quality :accessor l-quality)
+   (l-lost :initarg :lost :accessor l-lost)
+   (l-status :initarg :status :accessor l-status)
+   (l-time :initarg :time :accessor l-time))
+  (:default-initargs
+   :status 255))
 
 (defmethod print-object ((object link-tuple) stream)
   (print-unreadable-object (object stream :type t)
-    (with-slots (local-addr neighbor-addr l-time) object
-      (format stream "~A ~A ~A" local-addr neighbor-addr l-time))))
+    (with-slots (l-neighbor-iface-addr l-heard-time l-sym-time l-quality l-lost l-status l-time) object
+      (format stream "~A ~A" l-neighbor-iface-addr l-status))))
 
 (defclass packet ()
   ((pkt-header :initarg :pkt-header :reader pkt-header)
