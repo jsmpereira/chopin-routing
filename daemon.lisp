@@ -14,8 +14,9 @@
 
 (defparameter *base-station-p* nil)
 
-(defparameter *msg-types* '(:base-station-beacon 1 :node-beacon 2))
-(defparameter *tlv-types* '(:relay 1 :path 2))
+(defparameter *msg-types* '(:base-station-beacon 1 :node-beacon 2 :node-reply 3))
+(defparameter *tlv-types* '(:relay 1 :path 2 :link-status 3))
+(defparameter *link-status* '(:lost 0 :symmetric 1 :heard 2))
 
 (defparameter *out-buffer* (sb-concurrency:make-queue))
 
@@ -43,12 +44,29 @@
     ;; tlvs-length is number of octets of tlvs
     (make-instance 'tlv-block :tlvs-length (length buff) :tlv tlvs)))
 
-(defun make-message (&key msg-header tlv-block)
-  (make-instance 'message :msg-header msg-header :tlv-block tlv-block))
+(defun make-address-block (addr-list)
+  (make-instance 'address-block :addr-list addr-list))
 
-(defun make-packet (&key (msg-header (make-msg-header)) tlv-block)
+(defun make-address-block-tlv (addrs-status)
+  (let ((num-addrs (length addrs-status)))
+    (make-instance 'tlv-block :tlvs-length (+ num-addrs 3)  ; + 3 tlv fixed octets (tlv-type + tlv-flags + length)
+		   :tlv (list (make-instance 'tlv :tlv-type (getf *tlv-types* :link-status) :tlv-flags #b00010100
+					     :length num-addrs :value addrs-status)))))
+
+(defun build-address-block ()
+  (let* ((links (with-hash (*link-set* k v)
+		  collect v))
+	 (addr-list (mapcar #'l-neighbor-iface-addr links))
+	 (addr-status (mapcar #'l-status links)))
+    (make-addr+tlv :address-block (make-address-block addr-list)
+		   :tlv-block (make-address-block-tlv addr-status))))
+
+(defun make-message (&key msg-header tlv-block addr+tlv)
+  (make-instance 'message :msg-header msg-header :tlv-block tlv-block :addr+tlv addr+tlv))
+
+(defun make-packet (message)
   (make-instance 'packet :pkt-header (make-pkt-header)
-		 :message (make-message :msg-header msg-header :tlv-block tlv-block)))
+		 :message message))
 
 ;;; Message Building
 
@@ -57,13 +75,13 @@
   (loop for value in tlv-values
 	collect (make-tlv value :tlv-type tlv-type)))
 
-(defun build-packet (msg-header tlv-block)
+(defun build-packet (message)
   (userial:with-buffer (userial:make-buffer)
-    (serialize-msg-header msg-header)
-    (serialize-tlv-block tlv-block)
-    ;; msg-size is size of message including msg-header, that is msg-header+tlv-block
-    (setf (msg-size msg-header) (userial:buffer-length))
-    (make-packet :msg-header msg-header :tlv-block tlv-block)))
+    (serialize-message message)
+;   (serialize-tlv-block tlv-block)
+    ;; msg-size is size of message including msg-header, that is msg-header+tlv-block+(<addr-block><tlv-block>)*
+    (setf (msg-size (msg-header message)) (userial:buffer-length))
+    (make-packet message)))
 
 (defun generate-message (&key msg-header (msg-type :base-station-beacon) (tlv-type :relay)
 			   tlv-block (tlv-values (list (config-host-address *config*))))
@@ -76,6 +94,11 @@
       (decf hop-limit))
     (sb-concurrency:enqueue (build-packet msg-header tlvblock) *out-buffer*)
     (sb-thread:signal-semaphore *semaphore*)))
+
+(defun generate-node-beacon ()
+  (build-packet (make-message :msg-header (make-msg-header :msg-type :node-beacon)
+			      :addr+tlv (build-address-block))))
+
 
 (defun new-beacon (msg-type)
   "Enqueue a beacon in *OUT-BUFFER* given `msg-type'."
