@@ -39,7 +39,7 @@
 (defmethod print-object ((object packet) stream)
   (print-unreadable-object (object stream :type t)
     (with-slots (message) object
-      (format stream "SEQ: ~A ORIG: ~A BLOCK: ~A" (msg-seq-num (msg-header message)) (usocket:hbo-to-dotted-quad (msg-orig-addr (msg-header message))) (tlv (tlv-block message))))))
+      (format stream "SEQ: ~A ORIG: ~A BLOCK: ~A" (msg-seq-num (msg-header message)) (usocket:hbo-to-dotted-quad (msg-orig-addr (msg-header message))) (addr+tlv message)))))
 
 (defclass pkt-header ()
   ((version :initarg :version
@@ -58,7 +58,14 @@
 
 (defclass message ()
   ((msg-header :initarg :msg-header :reader msg-header)
-   (tlv-block :initarg :tlv-block :reader tlv-block)))
+   (tlv-block :initarg :tlv-block :reader tlv-block)
+   (addr+tlv :initarg :addr+tlv :reader addr+tlv
+	     :type 'addr+tlv)) ; (<addr-block><tlv-block>)*
+  (:default-initargs
+   :tlv-block nil
+   :addr+tlv nil))
+
+(defstruct addr+tlv address-block tlv-block)
 
 (defclass msg-header ()
   ((msg-type :initarg :msg-type
@@ -87,7 +94,7 @@
 		:type '(unsigned-byte 16)))
   (:default-initargs
    :msg-flags #b1111
-   :msg-addr-length #b0011
+   :msg-addr-length #b0011 ; IPv4
    :msg-size 0
    :msg-orig-addr (usocket:host-byte-order (config-host-address *config*))
    :msg-hop-limit (config-hop-limit *config*)
@@ -151,13 +158,9 @@ and remaining non-common octets of all addresses."
 	   :accessor vlength
 	   :type '(unsigned-byte 8))
    (value :initarg :value
-	  :accessor value
-	  :type '(unsigned-byte 32)))
-  (:default-initargs
-   :tlv-flags #b00010000
-   :length 4)) ; for 32-bit address
+	  :accessor value)))
 
 (defmethod print-object ((object tlv) stream)
   (print-unreadable-object (object stream :type t)
     (with-slots (tlv-type tlv-flags length value) object
-      (format stream "~A ~A ~A ~A" tlv-type tlv-flags length (usocket:hbo-to-dotted-quad value)))))
+      (format stream "~A ~A ~A ~A" tlv-type tlv-flags length value))))
