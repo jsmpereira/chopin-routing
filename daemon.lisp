@@ -249,9 +249,9 @@
 
 ;;; util
 
-(defmacro with-hash (hash &body body)
-  `(loop for k being the hash-keys in ,hash using (hash-value v)
-	 do ,@body))
+(defmacro with-hash ((hash k v) &body body)
+  `(loop for ,k being the hash-keys in ,hash using (hash-value ,v)
+	 ,@body))
 
 (defun load-config (&optional (path "quicklisp/local-projects/chopin-routing/.config"))
   (with-open-file (in (merge-pathnames path (user-homedir-pathname)) :direction :input)
@@ -269,5 +269,5 @@
 (defun kernel-table-cleanup ()
   "Loop through *ROUTING-TABLE* and cleanup routing entries from Kernel IP table."
   #-darwin
-  (with-hash *routing-table*
+  (with-hash (*routing-table* k v)
     (del-route (rt-entry-destination v) "0" (config-interface *config*) (rt-entry-hop-count v))))
