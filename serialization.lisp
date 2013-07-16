@@ -58,99 +58,104 @@
 (userial:make-accessor-serializer (:address-block address-block-instance (make-instance 'address-block))
 				  :uint8 num-addr
 				  :uint8 addr-flags
-				  :uint8 head-length)
+				  :uint8 head-length
+				  :head-vector head
+				  :mid mid)
 
 (userial:make-vector-serializer :head-vector :uint8 3) ; Address head is 192.168.0, length 3
 
-(userial:make-vector-serializer :mid :uint8 1) ; Address mid is x, in 192.168.0.x
+(userial:make-vector-serializer :mid-item :uint8 1) ; Address mid is x, in 192.168.0.x
+
+(userial:define-serializer (:mid mid)
+  (dolist (mid-item mid)
+    (userial:serialize :mid-item mid-item)))
+
+(userial:define-unserializer (:mid :extra (num-addr))
+  (loop repeat num-addr
+	collect (userial:unserialize :mit-item)))
 
 (defun serialize-address-block (address-block)
-  (with-slots (head mid) address-block
-    (userial:serialize :address-block address-block)
-    (userial:serialize :head-vector head)
-    (dolist (mid-item mid)
-      (userial:serialize :mid mid-item))))
+  (userial:unserialize :address-block address-block))
 
 (defun unserialize-address-block (address-block)
-  (let ((addr-block (userial:unserialize :address-block :address-block-instance address-block)))
-    (with-slots (num-addr head mid) addr-block
-      (setf head (userial:unserialize :head-vector))
-      (setf mid (loop repeat num-addr
-		      collect (userial:unserialize :mid))))
-    addr-block))
+  (userial:unserialize :address-block :address-block-instance address-block))
 
 ;;; tlv-block
 (userial:make-accessor-serializer (:tlv-block tlv-block-instance (make-instance 'tlv-block))
-				  :uint16 tlvs-length)
+				  :uint16 tlvs-length
+				  :tlvs tlvs)
+
+(userial:define-serializer (:tlvs tlvs)
+  (dolist (entry tlvs)
+    (serialize-tlv entry)))
+
+(userial:define-unserializer (:tlvs :extra (num-tlvs))
+  (loop repeat num-tlvs
+	collect (unserialize-tlv (make-instance 'tlv))))
 
 (defun serialize-tlv-block (tlv-block)
-  (with-accessors ((tlv tlv)) tlv-block
-    (userial:serialize :tlv-block tlv-block)
-    (dolist (entry tlv)
-      (serialize-tlv entry)))
-  (userial:get-buffer))
+  (userial:serialize :tlv-block tlv-block))
 
 (defun unserialize-tlv-block (tlv-block)
-  "A bit of a hack. Since we're using 32bit addresses, the tlv field is always 7 octets."
-  (let* ((tlvb (userial:unserialize :tlv-block :tlv-block-instance tlv-block)))
-    (setf (tlv tlvb)
-	  (loop repeat (/ (tlvs-length tlvb) 7)
-		collect (unserialize-tlv (make-instance 'tlv))))
-    tlvb))
+  (userial:unserialize :tlv-block :tlv-block-instance tlv-block))
 
 ;;; tlv
 (userial:make-accessor-serializer (:tlv tlv-instance (make-instance 'tlv))
 				  :uint8 tlv-type
 				  :uint8 tlv-flags
-				  :uint8 vlength)
+				  :uint8 vlength
+				  :value value)
+
+(userial:define-serializer (:value value)
+  (when (listp value)
+    (userial:serialize :raw-bytes
+		       (make-array (length value)
+				   :element-type '(unsigned-byte 8)
+				   :initial-contents value))))
 
 (defun serialize-tlv (tlv)
-  (with-slots (value) tlv
-    (userial:serialize :tlv tlv)
-    (when (listp value)
-      (userial:serialize :raw-bytes
-			 (make-array (length value)
-				     :element-type '(unsigned-byte 8)
-				     :initial-contents value)))))
+  (userial:serialize :tlv tlv))
 
 (defun unserialize-tlv (tlv)
   (userial:unserialize :tlv :tlv-instance tlv))
 
+(userial:make-accessor-serializer (:addr+tlv addr+tlv-instance (make-addr+tlv))
+				  :address-block addr+tlv-address-block
+				  :tlv-block addr+tlv-tlv-block)
 
 ;;; addr-block + tlv-block
 (defun serialize-addr+tlv (addr+tlv)
   "Serialize each `addr+tlv' struct in the given `message' addr+tlv."
-  (serialize-address-block (addr+tlv-address-block addr+tlv))
-  (serialize-tlv-block (addr+tlv-tlv-block addr+tlv)))
+  (userial:serialize :addr+tlv addr+tlv))
+
+(defun unserialize-addr+tlv (addr+tlv)
+  (userial:unserialize :addr+tlv :addr+tlv-instance addr+tlv))
 
 ;;; message
+(userial:make-accessor-serializer (:message msg-instance (make-instance 'message))
+				  :msg-header msg-header
+				  :tlv-block tlv-block
+				  :addr+tlv addr+tlv)
+
 (defun serialize-message (message)
   (with-slots (msg-header tlv-block addr+tlv) message
-    (serialize-msg-header msg-header)
+    (userial:serialize :msg-header msg-header)
     (when tlv-block
-      (serialize-tlv-block tlv-block))
+      (userial:serialize :tlv-block tlv-block))
     (when addr+tlv
-      (serialize-addr+tlv addr+tlv))))
+      (userial:serialize :addr+tlv addr+tlv)))
+  (userial:get-buffer))
+
+(defun unserialize-message (message)
+  (userial:unserialize :message :msg-instance message))
 
 ;;; packet
-(defun serialize-packet (packet)
-  "Packet, Message and Tlv-Block are encapsulation. What we want is the bytes from
-pkt-header, msg-header and tlv-block."
-  (let ((buffer (userial:make-buffer)))
-    (userial:with-buffer buffer
-      (let ((pkt-header (pkt-header packet))
-	    (msg-header (msg-header (message packet)))
-	    (tlv-block (tlv-block (message packet))))
-	(serialize-pkt-header pkt-header)
-	(serialize-msg-header msg-header)
-	(serialize-tlv-block tlv-block)
-	buffer))))
+(userial:make-accessor-serializer (:packet pkt-instance (make-instance 'packet))
+				  :pkt-header pkt-header
+				  :message message)
 
-(defun unserialize-packet (buffer)
-  "pkt-header, msg-header, tlvs-length, tlvs"
-  (userial:with-buffer buffer
-    (userial:buffer-rewind)
-    (let* ((pkt-header (unserialize-pkt-header (make-instance 'pkt-header)))
-	   (msg-header (unserialize-msg-header (make-instance 'msg-header)))
-	   (tlv-block (unserialize-tlv-block (make-instance 'tlv-block))))
-      (values pkt-header msg-header tlv-block))))
+(defun serialize-packet (packet)
+  (userial:serialize :packet packet))
+
+(defun unserialize-packet (packet)
+  (userial:unserialize :packet :pkt-instance packet))

@@ -50,7 +50,7 @@
 (defun make-address-block-tlv (addrs-status)
   (let ((num-addrs (length addrs-status)))
     (make-instance 'tlv-block :tlvs-length (+ num-addrs 3)  ; + 3 tlv fixed octets (tlv-type + tlv-flags + length)
-		   :tlv (list (make-instance 'tlv :tlv-type (getf *tlv-types* :link-status) :tlv-flags #b00010100
+		   :tlvs (list (make-instance 'tlv :tlv-type (getf *tlv-types* :link-status) :tlv-flags #b00010100
 					     :length num-addrs :value addrs-status)))))
 
 (defun build-address-block ()

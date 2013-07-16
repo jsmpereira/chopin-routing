@@ -33,8 +33,8 @@
       (format stream "~A ~A" l-neighbor-iface-addr l-status))))
 
 (defclass packet ()
-  ((pkt-header :initarg :pkt-header :reader pkt-header)
-   (message :initarg :message :reader message)))
+  ((pkt-header :initarg :pkt-header :accessor pkt-header)
+   (message :initarg :message :accessor message)))
 
 (defmethod print-object ((object packet) stream)
   (print-unreadable-object (object stream :type t)
@@ -57,12 +57,12 @@
    :pkt-seq-num *pkt-seq-num*))
 
 (defclass message ()
-  ((msg-header :initarg :msg-header :reader msg-header)
-   (tlv-block :initarg :tlv-block :reader tlv-block)
-   (addr+tlv :initarg :addr+tlv :reader addr+tlv
+  ((msg-header :initarg :msg-header :accessor msg-header)
+   (tlv-block :initarg :tlv-block :accessor tlv-block)
+   (addr+tlv :initarg :addr+tlv :accessor addr+tlv
 	     :type 'addr+tlv)) ; (<addr-block><tlv-block>)*
   (:default-initargs
-   :tlv-block nil
+   :tlv-block (make-instance 'tlv-block)
    :addr+tlv nil))
 
 (defstruct addr+tlv address-block tlv-block)
@@ -132,10 +132,16 @@ and remaining non-common octets of all addresses."
 (defclass tlv-block ()
   ((tlvs-length :initarg :tlvs-length :accessor tlvs-length
 		:type '(unsigned-byte 16))
-   (tlv :initarg :tlv :accessor tlv))
+   (tlvs :initarg :tlvs :accessor tlvs)
+   (num-tlvs :initarg :num-tlvs :accessor num-tlvs))
   (:default-initargs
    :tlvs-length 0
-   :tlv nil))
+   :tlvs nil
+   :num-tlvs nil))
+
+(defmethod initialize-instance :after ((tlv-block tlv-block) &key)
+  (with-slots (tlvs num-tlvs) tlv-block
+    (setf num-tlvs (length tlvs))))
 
 (defmethod path-destination ((tlv-block tlv-block))
   "Return last element of `tlv-block'."
