@@ -129,23 +129,33 @@
 
 ;(config-params :host-address :refresh-interval :neighb-hold-time)
 
-(defun update-link-set (msg-header tlv-block)
+(defun update-link-set (message tlv-block)
   "Add or update *LINK-SET* entry. For an existing entry update L-TIME. Otherwise, create new `link-tuple'."
   (multiple-value-bind (ref-interval neighb-holding)
       (link-set-params)
-    (let* ((l-time (dt:second+ (dt:now) (* neighb-holding ref-interval)))
-	   (ls-hash (message-hash (msg-orig-addr msg-header)))
+    (let* ((orig-addr (msg-orig-addr (msg-header message)))
+	   (l-time (dt:second+ (dt:now) (* neighb-holding ref-interval)))
+	   (ls-hash (message-hash orig-addr))
 	   (current-link (gethash ls-hash *link-set*)))
-      (if (and current-link (equal (l-neighbor-iface-addr current-link) (next-hop tlv-block)))
-	  (setf (l-time current-link) l-time)
+      (if (and current-link (equal (l-neighbor-iface-addr current-link) orig-addr))
+	  (progn (setf (l-time current-link) l-time)
+		 (when (symmetric-p (addr+tlv message) orig-addr)
+		   (setf (l-status current-link) (getf *link-status* :symmetric))))
 	  (progn
-	    (setf (gethash ls-hash *link-set*) (make-instance 'link-tuple :neighbor-iface-addr (usocket:hbo-to-dotted-quad (msg-orig-addr msg-header))
+	    (setf (gethash ls-hash *link-set*) (make-instance 'link-tuple :neighbor-iface-addr orig-addr
 							      :l-time l-time))
-	    (update-routing-table msg-header tlv-block))))))
+	    (update-routing-table (msg-header message) ))))))
 
-(defun update-duplicate-set (msg-header)
+(defun symmetric-p (addr+tlv orig-addr)
+  (let ((addr-block (addr+tlv-address-block addr+tlv)))
+    (with-slots (head mid) addr-block
+      (member orig-addr
+	      (loop for m in mid
+		    collect (usocket:host-byte-order (concatenate 'vector head m)))))))
+
+(defun update-duplicate-set (message)
   "Create a `duplicate-tuple' from MSG-HEADER to be added to *DUPLICATE-SET*."
-  (with-slots (msg-type msg-orig-addr msg-seq-num) msg-header
+  (with-slots (msg-type msg-orig-addr msg-seq-num) (msg-header message)
     (setf (gethash (message-hash msg-type msg-orig-addr msg-seq-num) *duplicate-set*)
 	  (make-instance 'duplicate-tuple :orig-addr msg-orig-addr :msg-type msg-type :seq-num msg-seq-num
 			 :exp-time (dt:second+ (dt:now) (config-dup-hold-time *config*))))))
@@ -155,16 +165,19 @@
   #-darwin
   (add-route (usocket:hbo-to-dotted-quad destination) (usocket:hbo-to-dotted-quad gateway) iface metric))
 
-(defun update-routing-table (msg-header tlv-block)
+(defun next-hop (msg-header)
+  (cond ((= (msg-type msg-header) (getf *msg-types* :base-station-beacon)) (msg-orig-addr msg-header))
+	(t 0)))
+
+(defun update-routing-table (msg-header)
   "Create `rt-entry' and add to *ROUTING-TABLE*. DESTINATION is the last of the TLV values in TLV-BLOCK."
   (with-slots (msg-orig-addr msg-seq-num msg-hop-count) msg-header
-    (let ((destination (path-destination tlv-block)))
+    (let* ((destination (msg-orig-addr msg-header))
+	   (next-hop (next-hop destination)))
       (setf (gethash (message-hash destination) *routing-table*)
 	    (make-rt-entry :destination (usocket:hbo-to-dotted-quad destination)
-			   :next-hop (tlv tlv-block) :hop-count (1+ msg-hop-count) :seq-num msg-seq-num))
-      (if (= msg-orig-addr (next-hop tlv-block))
-	  (update-kernel-routing-table destination 0 (config-interface *config*) (1+ msg-hop-count))
-	  (update-kernel-routing-table destination (next-hop tlv-block) (config-interface *config*) (1+ msg-hop-count))))))
+			   :next-hop next-hop :hop-count (1+ msg-hop-count) :seq-num msg-seq-num))
+      (update-kernel-routing-table destination next-hop (config-interface *config*) (1+ msg-hop-count)))))
 
 (defun del-routing-table (destination)
   (let* ((rt-hash (message-hash (usocket:host-byte-order destination)))
@@ -179,25 +192,29 @@
 			  (value x)) (tlv tlv-block))))
     (and (notany #'zerop tlvs) (notany #'host-address-p tlvs))))
 
-(defun process-message (pkt-header msg-header tlv-block)
+(defun process-message (message)
   "Update *ROUTING-TABLE*, *DUPLICATE-SET* and *LINK-SET*. If MSG-TYPE is :BASE-STATION-BEACON broadcast. If MSG-TYPE is :NODE-BEACON unicast to next-hop to Base Station. "
-  (with-accessors ((msg-type msg-type) (orig-addr msg-orig-addr) (seq-num msg-seq-num) (hop-count msg-hop-count) (hop-limit msg-hop-limit)) msg-header
+  (let ((msg-type (msg-header message))
+	(addr+tlv (addr+tlv message)))
     (incf *messages-received*)
-    (update-link-set msg-header tlv-block)
-    (update-duplicate-set msg-header)
-    (let ((new-tlv-block (make-tlv-block (adjoin (make-tlv (config-host-address *config*)) (tlv tlv-block)))))
-      (unless *base-station-p* ; Base Station does not forward messages
-	(cond
-	  ((and (= msg-type (getf *msg-types* :base-station-beacon)))
-	   (generate-message :msg-header msg-header :msg-type msg-type :tlv-type :relay :tlv-block new-tlv-block))
-	  ((and (= msg-type (getf *msg-types* :node-beacon)))
-	   (generate-message :msg-header msg-header :msg-type msg-type :tlv-type :path :tlv-block new-tlv-block))
-	  (t (rcvlog (format nil "!!!! THIS SHOULD NOT BE REACHED!!!!!"))))))))
+    (update-link-set message)
+    (update-duplicate-set message)
+    (unless *base-station-p* ; Base Station does not forward messages
+      (cond
+	((and (= msg-type (getf *msg-types* :base-station-beacon)))
+	 (rcvlog (format nil "BSB"))
+					;	   (generate-message :msg-header msg-header :msg-type msg-type :tlv-type :relay :tlv-block new-tlv-block)
+	 )
+	((and (= msg-type (getf *msg-types* :node-beacon)))
+	 (rcvlog (format nil "NODE BEACON"))
+					;	   (generate-message :msg-header msg-header :msg-type msg-type :tlv-type :path :tlv-block new-tlv-block)
+	 )
+	(t (rcvlog (format nil "!!!! THIS SHOULD NOT BE REACHED!!!!!")))))))
 
 (defun retrieve-message (buffer size)
   "Unserialize BUFFER and into PKT-HEADER, MSG-HEADER and TLV-BLOCK. Parse MSG-HEADER according to RFC 5444."
-  (multiple-value-bind (pkt-header msg-header tlv-block)
-      (unserialize-packet buffer)
+  (let* ((packet (unserialize-packet buffer))
+	 (msg-header (msg-header (message packet))))
     (when (= size (length buffer)) ;; read size must match unserialized length
       (with-accessors ((msg-type msg-type) (orig-addr msg-orig-addr) (seq-num msg-seq-num) (hop-limit msg-hop-limit) (hop-count msg-hop-count)) msg-header
 	(cond
@@ -206,8 +223,7 @@
 	  ((= hop-count 255) nil) ; discard
 	  ((host-address-p orig-addr) (rcvlog (format nil "TALKING TO SELF"))) ; discard
 	  ((check-duplicate-set msg-type orig-addr seq-num) (rcvlog (format nil "DUPLICATE"))) ; discard
-	  ((not (valid-tlv-block-p tlv-block)) nil) ; discard
-	  (t (process-message pkt-header msg-header tlv-block)))))))
+	  (t (process-message (message packet))))))))
 
 (defun out-buffer-get ()
   "Dequeue element from *OUT-BUFFER* and serialize it into a PACKET."
@@ -296,4 +312,4 @@
   "Loop through *ROUTING-TABLE* and cleanup routing entries from Kernel IP table."
   #-darwin
   (with-hash (*routing-table* k v)
-    (del-route (rt-entry-destination v) "0" (config-interface *config*) (rt-entry-hop-count v))))
+    do (del-route (rt-entry-destination v) "0" (config-interface *config*) (rt-entry-hop-count v))))

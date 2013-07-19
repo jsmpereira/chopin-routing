@@ -171,6 +171,7 @@
       (userial:serialize :packet packet))
     buffer))
 
-(defun unserialize-packet ()
-  (userial:buffer-rewind)
-  (userial:unserialize :packet))
+(defun unserialize-packet (buffer)
+  (userial:with-buffer buffer
+    (userial:buffer-rewind)
+    (userial:unserialize :packet)))

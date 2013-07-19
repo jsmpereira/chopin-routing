@@ -138,16 +138,10 @@ and remaining non-common octets of all addresses."
 (defclass tlv-block ()
   ((tlvs-length :initarg :tlvs-length :accessor tlvs-length
 		:type '(unsigned-byte 16))
-   (tlvs :initarg :tlvs :accessor tlvs)
-   (num-tlvs :initarg :num-tlvs :accessor num-tlvs))
+   (tlvs :initarg :tlvs :accessor tlvs))
   (:default-initargs
    :tlvs-length 0
-   :tlvs nil
-   :num-tlvs nil))
-
-(defmethod initialize-instance :after ((tlv-block tlv-block) &key)
-  (with-slots (tlvs num-tlvs) tlv-block
-    (setf num-tlvs (length tlvs))))
+   :tlvs nil))
 
 (defmethod path-destination ((tlv-block tlv-block))
   "Return last element of `tlv-block'."
