@@ -39,7 +39,7 @@
 (defmethod print-object ((object packet) stream)
   (print-unreadable-object (object stream :type t)
     (with-slots (message) object
-      (format stream "SEQ: ~A ORIG: ~A BLOCK: ~A" (msg-seq-num (msg-header message)) (usocket:hbo-to-dotted-quad (msg-orig-addr (msg-header message))) (addr+tlv message)))))
+      (format stream "PKT-HEADER => ~A MESSAGE => SEQ: ~A ORIG: ~A BLOCK: ~A" (pkt-header object) (msg-seq-num (msg-header message)) (usocket:hbo-to-dotted-quad (msg-orig-addr (msg-header message))) (addr+tlv message)))))
 
 (defclass pkt-header ()
   ((version :initarg :version
@@ -93,6 +93,7 @@
 		:accessor msg-seq-num
 		:type '(unsigned-byte 16)))
   (:default-initargs
+   :msg-type nil
    :msg-flags #b1111
    :msg-addr-length #b0011 ; IPv4
    :msg-size 0
@@ -100,6 +101,11 @@
    :msg-hop-limit (config-hop-limit *config*)
    :msg-hop-count 0
    :msg-seq-num *msg-seq-num*))
+
+(defmethod initialize-instance :after ((msg-header msg-header) &key)
+  (with-slots (msg-seq-num msg-type) msg-header
+    (setf msg-type (getf *msg-types* msg-type))
+    (setf msg-seq-num (incf *msg-seq-num*))))
 
 (defclass address-block ()
   ((num-addr :initarg :num-addr :accessor num-addr

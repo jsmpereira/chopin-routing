@@ -29,9 +29,6 @@
 (defun make-pkt-header ()
   (make-instance 'pkt-header :pkt-seq-num (incf *pkt-seq-num*)))
 
-(defun make-msg-header (&key (msg-type :base-station-beacon))
-  (make-instance 'msg-header :msg-type (getf *msg-types* msg-type) :msg-seq-num (incf *msg-seq-num*)))
-
 (defun make-tlv (value &key (tlv-type :relay))
   (make-instance 'tlv :tlv-type (getf *tlv-types* tlv-type) :value (usocket:host-byte-order value)))
 
@@ -42,7 +39,7 @@
       (dolist (entry tlvs)
 	(serialize-tlv entry)))
     ;; tlvs-length is number of octets of tlvs
-    (make-instance 'tlv-block :tlvs-length (length buff) :tlv tlvs)))
+    (make-instance 'tlv-block :tlvs-length (length buff) :tlvs tlvs)))
 
 (defun make-address-block (addr-list)
   (make-instance 'address-block :addr-list addr-list))
@@ -53,13 +50,13 @@
 		   :tlvs (list (make-instance 'tlv :tlv-type (getf *tlv-types* :link-status) :tlv-flags #b00010100
 					     :length num-addrs :value addrs-status)))))
 
-(defun build-address-block ()
-  (let* ((links (with-hash (*link-set* k v)
-		  collect v))
-	 (addr-list (mapcar #'l-neighbor-iface-addr links))
-	 (addr-status (mapcar #'l-status links)))
-    (make-addr+tlv :address-block (make-address-block addr-list)
-		   :tlv-block (make-address-block-tlv addr-status))))
+(defun build-address-block+tlv ()
+  (unless (zerop (hash-table-count *link-set*))
+    (let* ((links (alexandria:hash-table-values *link-set*))
+	   (addr-list (mapcar #'l-neighbor-iface-addr links))
+	   (addr-status (mapcar #'l-status links)))
+      (make-addr+tlv :address-block (make-address-block addr-list)
+		     :tlv-block (make-address-block-tlv addr-status)))))
 
 (defun make-message (&key msg-header tlv-block addr+tlv)
   (make-instance 'message :msg-header msg-header :tlv-block tlv-block :addr+tlv addr+tlv))
@@ -77,8 +74,8 @@
 
 (defun build-packet (message)
   (userial:with-buffer (userial:make-buffer)
-    (serialize-message message)
-;   (serialize-tlv-block tlv-block)
+    (userial:serialize :message message)
+    ;; (serialize-tlv-block tlv-block)
     ;; msg-size is size of message including msg-header, that is msg-header+tlv-block+(<addr-block><tlv-block>)*
     (setf (msg-size (msg-header message)) (userial:buffer-length))
     (make-packet message)))
@@ -86,25 +83,32 @@
 (defun generate-message (&key msg-header (msg-type :base-station-beacon) (tlv-type :relay)
 			   tlv-block (tlv-values (list (config-host-address *config*))))
   "Enqueue `packet' in *OUT-BUFFER*."
-  (let* ((msg-header (or msg-header (make-msg-header :msg-type msg-type)))
+  (let* ((msg-header (or msg-header (make-instance 'msg-header :msg-type msg-type)))
 	 (tlvs (unless tlv-block (build-tlvs tlv-values :tlv-type tlv-type)))
 	 (tlvblock (or tlv-block (make-tlv-block tlvs))))
     (with-accessors ((orig-addr msg-orig-addr) (hop-count msg-hop-count) (hop-limit msg-hop-limit)) msg-header
       (incf hop-count)
       (decf hop-limit))
-    (sb-concurrency:enqueue (build-packet msg-header tlvblock) *out-buffer*)
+    (sb-concurrency:enqueue (build-packet (make-message :msg-header msg-header :tlv-block tlvblock)) *out-buffer*)
     (sb-thread:signal-semaphore *semaphore*)))
 
 (defun generate-node-beacon ()
-  (build-packet (make-message :msg-header (make-msg-header :msg-type :node-beacon)
-			      :addr+tlv (build-address-block))))
+  (sb-concurrency:enqueue 
+   (build-packet (make-message :msg-header (make-instance 'msg-header :msg-type :node-beacon :msg-hop-limit 1)
+			       :addr+tlv (build-address-block+tlv))) *out-buffer*))
 
+(defun generate-base-station-beacon ()
+  (sb-concurrency:enqueue
+   (build-packet (make-message :msg-header (make-instance 'msg-header :msg-type :base-station-beacon))) *out-buffer*))
 
 (defun new-beacon (msg-type)
   "Enqueue a beacon in *OUT-BUFFER* given `msg-type'."
-  (assert (valid-msg-type-p msg-type))
-  (sb-concurrency:enqueue (build-packet (make-msg-header :msg-type msg-type)
-					(make-tlv-block (build-tlvs (list (config-host-address *config*))))) *out-buffer*)
+  (assert (valid-msg-type-p msg-type) ()
+	  "Invalid message type.")
+  (case msg-type
+    (:node-beacon (generate-node-beacon))
+    (:node-reply 'nr)
+    (:base-station-beacon (generate-base-station-beacon)))
   (sb-thread:signal-semaphore *semaphore*))
 
 (defun message-hash (&rest rest)
@@ -120,7 +124,6 @@
 
 (defun link-set-params ()
   (values
-   (config-host-address *config*)
    (config-refresh-interval *config*)
    (config-neighb-hold-time *config*)))
 
@@ -128,16 +131,16 @@
 
 (defun update-link-set (msg-header tlv-block)
   "Add or update *LINK-SET* entry. For an existing entry update L-TIME. Otherwise, create new `link-tuple'."
-  (multiple-value-bind (local-addr ref-interval neighb-holding)
+  (multiple-value-bind (ref-interval neighb-holding)
       (link-set-params)
     (let* ((l-time (dt:second+ (dt:now) (* neighb-holding ref-interval)))
 	   (ls-hash (message-hash (msg-orig-addr msg-header)))
 	   (current-link (gethash ls-hash *link-set*)))
-      (if (and current-link (equal (neighbor-addr current-link) (next-hop tlv-block)))
+      (if (and current-link (equal (l-neighbor-iface-addr current-link) (next-hop tlv-block)))
 	  (setf (l-time current-link) l-time)
 	  (progn
-	    (setf (gethash ls-hash *link-set*) (make-instance 'link-tuple :local-addr local-addr
-							      :neighbor-addr (usocket:hbo-to-dotted-quad (msg-orig-addr msg-header)) :l-time l-time))
+	    (setf (gethash ls-hash *link-set*) (make-instance 'link-tuple :neighbor-iface-addr (usocket:hbo-to-dotted-quad (msg-orig-addr msg-header))
+							      :l-time l-time))
 	    (update-routing-table msg-header tlv-block))))))
 
 (defun update-duplicate-set (msg-header)
@@ -226,17 +229,17 @@
 	when (dt:time>= (dt:now) (slot-value link-tuple 'l-time))
 	do (progn
 	     (remhash key *link-set*)
-	     (del-routing-table (neighbor-addr link-tuple)))))
+	     (del-routing-table (l-neighbor-iface-addr link-tuple)))))
 
 (defun start-timers ()
   "Setup and start timers."
-  (sb-ext:schedule-timer (sb-ext:make-timer #'check-duplicate-holding :thread t) 10 :repeat-interval (config-dup-hold-time *config*))
-  (sb-ext:schedule-timer (sb-ext:make-timer #'check-link-set-validity :thread t) 10 :repeat-interval (config-neighb-hold-time *config*))
+  (sb-ext:schedule-timer (sb-ext:make-timer #'check-duplicate-holding :name "Duplicate Set Timer" :thread t) 10 :repeat-interval (config-dup-hold-time *config*))
+  (sb-ext:schedule-timer (sb-ext:make-timer #'check-link-set-validity :name "Link Set Timer" :thread t) 10 :repeat-interval (config-neighb-hold-time *config*))
   (sb-ext:schedule-timer (sb-ext:make-timer #'(lambda ()
 						(if *base-station-p*
 						    (new-beacon :base-station-beacon)
 						    (new-beacon :node-beacon)))
-					    :thread t) 0 :repeat-interval (config-refresh-interval *config*))
+					    :thread t :name "Beacon Timer") 0 :repeat-interval (config-refresh-interval *config*))
   (sb-ext:schedule-timer (sb-ext:make-timer #'screen :thread t) 3 :repeat-interval (config-refresh-interval *config*)))
 
 (defun stop-timers ()

@@ -51,8 +51,8 @@
 (defun serialize-msg-header (msg-header)
   (userial:serialize :msg-header msg-header))
 
-(defun unserialize-msg-header (msg-header)
-  (userial:unserialize :msg-header :mh-instance msg-header))
+(defun unserialize-msg-header ()
+  (userial:unserialize :msg-header))
 
 ;;; addr-block
 (userial:make-accessor-serializer (:address-block address-block-instance (make-instance 'address-block))
@@ -72,13 +72,21 @@
 
 (userial:define-unserializer (:mid :extra (num-addr))
   (loop repeat num-addr
-	collect (userial:unserialize :mit-item)))
+	collect (userial:unserialize :mid-item)))
+
+(userial:define-unserializer (:address-block)
+  (userial:unserialize-let* (:uint8 num-addr
+			     :uint8 addr-flags
+			     :uint8 head-length
+			     :head-vector head)
+    (make-instance 'address-block :num-addr num-addr :addr-flags addr-flags :head-length head-length
+		   :head head :mid (userial:unserialize :mid :num-addr num-addr))))
 
 (defun serialize-address-block (address-block)
   (userial:unserialize :address-block address-block))
 
-(defun unserialize-address-block (address-block)
-  (userial:unserialize :address-block :address-block-instance address-block))
+(defun unserialize-address-block ()
+  (userial:unserialize :address-block))
 
 ;;; tlv-block
 (userial:make-accessor-serializer (:tlv-block tlv-block-instance (make-instance 'tlv-block))
@@ -89,15 +97,14 @@
   (dolist (entry tlvs)
     (serialize-tlv entry)))
 
-(userial:define-unserializer (:tlvs :extra (num-tlvs))
-  (loop repeat num-tlvs
-	collect (unserialize-tlv (make-instance 'tlv))))
+(userial:define-unserializer (:tlvs)
+  (userial:unserialize :tlv))
 
 (defun serialize-tlv-block (tlv-block)
   (userial:serialize :tlv-block tlv-block))
 
-(defun unserialize-tlv-block (tlv-block)
-  (userial:unserialize :tlv-block :tlv-block-instance tlv-block))
+(defun unserialize-tlv-block ()
+  (userial:unserialize :tlv-block))
 
 ;;; tlv
 (userial:make-accessor-serializer (:tlv tlv-instance (make-instance 'tlv))
@@ -107,17 +114,24 @@
 				  :value value)
 
 (userial:define-serializer (:value value)
-  (when (listp value)
-    (userial:serialize :raw-bytes
-		       (make-array (length value)
-				   :element-type '(unsigned-byte 8)
-				   :initial-contents value))))
+  (userial:serialize :raw-bytes
+		     (make-array (length value)
+				 :element-type '(unsigned-byte 8)
+				 :initial-contents value)))
+
+(userial:define-unserializer (:value :extra (vlength))
+  (loop repeat vlength
+	collect (userial:unserialize :uint8)))
 
 (defun serialize-tlv (tlv)
   (userial:serialize :tlv tlv))
 
-(defun unserialize-tlv (tlv)
-  (userial:unserialize :tlv :tlv-instance tlv))
+(userial:define-unserializer (:tlv)
+  (userial:unserialize-let* (:uint8 tlv-type
+			     :uint8 tlv-flags
+			     :uint8 vlength)
+    (make-instance 'tlv :tlv-type tlv-type :tlv-flags tlv-flags
+		   :length vlength :value (userial:unserialize :value :vlength vlength))))
 
 (userial:make-accessor-serializer (:addr+tlv addr+tlv-instance (make-addr+tlv))
 				  :address-block addr+tlv-address-block
@@ -128,16 +142,11 @@
   "Serialize each `addr+tlv' struct in the given `message' addr+tlv."
   (userial:serialize :addr+tlv addr+tlv))
 
-(defun unserialize-addr+tlv (addr+tlv)
-  (userial:unserialize :addr+tlv :addr+tlv-instance addr+tlv))
+(defun unserialize-addr+tlv ()
+  (userial:unserialize :addr+tlv))
 
 ;;; message
-(userial:make-accessor-serializer (:message msg-instance (make-instance 'message))
-				  :msg-header msg-header
-				  :tlv-block tlv-block
-				  :addr+tlv addr+tlv)
-
-(defun serialize-message (message)
+(userial:define-serializer (:message message)
   (with-slots (msg-header tlv-block addr+tlv) message
     (userial:serialize :msg-header msg-header)
     (when tlv-block
@@ -146,8 +155,10 @@
       (userial:serialize :addr+tlv addr+tlv)))
   (userial:get-buffer))
 
-(defun unserialize-message (message)
-  (userial:unserialize :message :msg-instance message))
+(userial:define-unserializer (:message)
+  (userial:unserialize-let* (:msg-header msg-header
+			      :addr+tlv addr+tlv)
+    (make-instance 'message :msg-header msg-header :addr+tlv addr+tlv)))
 
 ;;; packet
 (userial:make-accessor-serializer (:packet pkt-instance (make-instance 'packet))
@@ -155,7 +166,11 @@
 				  :message message)
 
 (defun serialize-packet (packet)
-  (userial:serialize :packet packet))
+  (let ((buffer (userial:make-buffer)))
+    (userial:with-buffer buffer
+      (userial:serialize :packet packet))
+    buffer))
 
-(defun unserialize-packet (packet)
-  (userial:unserialize :packet :pkt-instance packet))
+(defun unserialize-packet ()
+  (userial:buffer-rewind)
+  (userial:unserialize :packet))
