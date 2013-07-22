@@ -127,8 +127,6 @@
    (config-refresh-interval *config*)
    (config-neighb-hold-time *config*)))
 
-;(config-params :host-address :refresh-interval :neighb-hold-time)
-
 (defun update-link-set (message tlv-block)
   "Add or update *LINK-SET* entry. For an existing entry update L-TIME. Otherwise, create new `link-tuple'."
   (multiple-value-bind (ref-interval neighb-holding)
@@ -139,12 +137,12 @@
 	   (current-link (gethash ls-hash *link-set*)))
       (if (and current-link (equal (l-neighbor-iface-addr current-link) orig-addr))
 	  (progn (setf (l-time current-link) l-time)
-		 (when (symmetric-p (addr+tlv message) orig-addr)
+		 (when (and (addr+tlv message) (symmetric-p (addr+tlv message) orig-addr))
 		   (setf (l-status current-link) (getf *link-status* :symmetric))))
 	  (progn
 	    (setf (gethash ls-hash *link-set*) (make-instance 'link-tuple :neighbor-iface-addr orig-addr
 							      :time l-time))
-	    (update-routing-table (msg-header message) ))))))
+	    (update-routing-table (msg-header message)))))))
 
 (defun symmetric-p (addr+tlv orig-addr)
   (let ((addr-block (addr+tlv-address-block addr+tlv)))
@@ -214,7 +212,6 @@
 (defun retrieve-message (buffer size)
   "Unserialize BUFFER and into PKT-HEADER, MSG-HEADER and TLV-BLOCK. Parse MSG-HEADER according to RFC 5444."
   (let* ((packet (unserialize-packet buffer)))
-    (rcvlog (format nil "length: ~A ~A" size (length buffer)))
     (when (= size (length buffer)) ;; read size must match unserialized length
       (with-accessors ((msg-type msg-type) (orig-addr msg-orig-addr) (seq-num msg-seq-num) (hop-limit msg-hop-limit) (hop-count msg-hop-count)) (msg-header (message packet))
 	(rcvlog (format nil "~A ~A ~A ~A ~A~%" msg-type orig-addr seq-num hop-limit hop-count))

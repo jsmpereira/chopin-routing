@@ -25,12 +25,12 @@
    (l-status :initarg :status :accessor l-status)
    (l-time :initarg :time :accessor l-time))
   (:default-initargs
-   :status 255))
+   :status (getf *link-status* :heard)))
 
 (defmethod print-object ((object link-tuple) stream)
   (print-unreadable-object (object stream :type t)
     (with-slots (l-neighbor-iface-addr l-heard-time l-sym-time l-quality l-lost l-status l-time) object
-      (format stream "~A ~A" l-neighbor-iface-addr l-status))))
+      (format stream "~A ~A" (usocket:hbo-to-dotted-quad l-neighbor-iface-addr) l-status))))
 
 (defclass packet ()
   ((pkt-header :initarg :pkt-header :accessor pkt-header)
