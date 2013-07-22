@@ -194,7 +194,7 @@
 
 (defun process-message (message)
   "Update *ROUTING-TABLE*, *DUPLICATE-SET* and *LINK-SET*. If MSG-TYPE is :BASE-STATION-BEACON broadcast. If MSG-TYPE is :NODE-BEACON unicast to next-hop to Base Station. "
-  (let ((msg-type (msg-header message))
+  (let ((msg-type (msg-type (msg-header message)))
 	(addr+tlv (addr+tlv message)))
     (incf *messages-received*)
     (update-link-set message addr+tlv)
