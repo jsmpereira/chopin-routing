@@ -143,7 +143,7 @@
 		   (setf (l-status current-link) (getf *link-status* :symmetric))))
 	  (progn
 	    (setf (gethash ls-hash *link-set*) (make-instance 'link-tuple :neighbor-iface-addr orig-addr
-							      :l-time l-time))
+							      :time l-time))
 	    (update-routing-table (msg-header message) ))))))
 
 (defun symmetric-p (addr+tlv orig-addr)
@@ -173,7 +173,7 @@
   "Create `rt-entry' and add to *ROUTING-TABLE*. DESTINATION is the last of the TLV values in TLV-BLOCK."
   (with-slots (msg-orig-addr msg-seq-num msg-hop-count) msg-header
     (let* ((destination (msg-orig-addr msg-header))
-	   (next-hop (next-hop destination)))
+	   (next-hop (next-hop msg-header)))
       (setf (gethash (message-hash destination) *routing-table*)
 	    (make-rt-entry :destination (usocket:hbo-to-dotted-quad destination)
 			   :next-hop next-hop :hop-count (1+ msg-hop-count) :seq-num msg-seq-num))
@@ -197,7 +197,7 @@
   (let ((msg-type (msg-header message))
 	(addr+tlv (addr+tlv message)))
     (incf *messages-received*)
-    (update-link-set message)
+    (update-link-set message addr+tlv)
     (update-duplicate-set message)
     (unless *base-station-p* ; Base Station does not forward messages
       (cond
@@ -213,10 +213,11 @@
 
 (defun retrieve-message (buffer size)
   "Unserialize BUFFER and into PKT-HEADER, MSG-HEADER and TLV-BLOCK. Parse MSG-HEADER according to RFC 5444."
-  (let* ((packet (unserialize-packet buffer))
-	 (msg-header (msg-header (message packet))))
+  (let* ((packet (unserialize-packet buffer)))
+    (rcvlog (format nil "length: ~A ~A" size (length buffer)))
     (when (= size (length buffer)) ;; read size must match unserialized length
-      (with-accessors ((msg-type msg-type) (orig-addr msg-orig-addr) (seq-num msg-seq-num) (hop-limit msg-hop-limit) (hop-count msg-hop-count)) msg-header
+      (with-accessors ((msg-type msg-type) (orig-addr msg-orig-addr) (seq-num msg-seq-num) (hop-limit msg-hop-limit) (hop-count msg-hop-count)) (msg-header (message packet))
+	(rcvlog (format nil "~A ~A ~A ~A ~A~%" msg-type orig-addr seq-num hop-limit hop-count))
 	(cond
 	  ((not (member msg-type *msg-types*)) (rcvlog (format nil "UNRECOGNIZED TYPE"))) ;discard
 	  ((= hop-limit 0) nil) ; discard
