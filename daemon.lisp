@@ -147,7 +147,7 @@
       (rcvlog (format nil "~A ~A~%" orig-addr current-link))
       (if (and current-link (equal (l-neighbor-iface-addr current-link) orig-addr))
 	  (progn (setf (l-time current-link) l-time)
-		 (when (and (addr+tlv message) (symmetric-p (addr+tlv message) orig-addr))
+		 (when (and (addr+tlv message) (symmetric-p (addr+tlv message) (usocket:host-byte-order (config-host-address *config*))))
 		   (setf (l-status current-link) (getf *link-status* :symmetric))))
 	  (progn
 	    (setf (gethash ls-hash *link-set*) (make-instance 'link-tuple :neighbor-iface-addr orig-addr
@@ -210,17 +210,22 @@
 	(addr+tlv (addr+tlv message)))
     (with-slots (msg-type msg-orig-addr) msg-header
       (incf *messages-received*)
-      (unless *base-station-p* ; Base Station does not forward messages
-	(cond
-	  ((and (= msg-type (getf *msg-types* :base-station-beacon)) (symmetric-link-p msg-orig-addr))
-	   (generate-node-message :node-reply))
-	  ((= msg-type (getf *msg-types* :node-beacon))
-	   (update-link-set message addr+tlv)
-	   (update-duplicate-set message)
-	   (format t "NODE BEACON"))
-	  ((= msg-type (getf *msg-types* :node-reply))
-	   (forward-node-reply msg-header addr+tlv))
-	  (t nil))))))
+      (cond
+	((and (= msg-type (getf *msg-types* :base-station-beacon)) (not *base-station-p*) (symmetric-link-p msg-orig-addr))
+	 (rcvlog (format nil "BASE STATION BEACON"))
+	 (generate-node-message :node-reply))
+	((and (= msg-type (getf *msg-types* :node-beacon)) (not *base-station-p*))
+	 (rcvlog (format nil "NODE BEACON"))
+	 (update-link-set message addr+tlv)
+	 (update-duplicate-set message))
+	((and (= msg-type (getf *msg-types* :node-reply)))
+	 (rcvlog (format nil "NODE REPLY"))
+	 (if *base-station-p*
+	     (progn
+	       (update-link-set message addr+tlv)
+	       (update-duplicate-set message))
+	     (forward-node-reply msg-header addr+tlv)))
+	(t nil)))))
 
 (defun retrieve-message (buffer size)
   "Unserialize BUFFER and into PKT-HEADER, MSG-HEADER and TLV-BLOCK. Parse MSG-HEADER according to RFC 5444."
