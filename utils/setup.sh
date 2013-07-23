@@ -39,7 +39,7 @@ function filter_by_mac(){
 function add_mac(){
     echo "Enter MAC Address:"
     read MAC
-    filter_by_mac $MAC
+    filter_by_mac $MAC -I
     echo "Add another?"
     select yn in "Yes" "No"; do
     case $yn in
