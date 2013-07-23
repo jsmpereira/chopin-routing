@@ -95,9 +95,13 @@
 (defun generate-node-message (type)
   (let ((packet nil))
     (if (equal type :node-beacon)
-	(setf packet (build-packet (make-message :msg-header (make-instance 'msg-header :msg-type :node-beacon :msg-hop-limit 1)
-						 :addr+tlv (build-address-block+tlv))))
-	(setf packet (build-packet (make-message :msg-header (make-instance 'msg-header :msg-type :node-reply)))))
+	(setf packet (build-packet
+		      (make-message :msg-header (make-instance 'msg-header :msg-type :node-beacon :msg-hop-limit 1)
+				    :addr+tlv (build-address-block+tlv))))
+	(setf packet (build-packet
+		      (make-message :msg-header (make-instance 'msg-header :msg-type :node-reply)
+				    :addr+tlv (make-addr+tlv :address-block (make-address-block (list (usocket:host-byte-order (config-host-address *config*))))
+							     :tlv-block (make-address-block-tlv '(1)))))))
     (sb-concurrency:enqueue packet *out-buffer*)))
 
 (defun forward-node-reply (msg-header addr+tlv)
@@ -214,7 +218,7 @@
 	((and (= msg-type (getf *msg-types* :base-station-beacon)) (not *base-station-p*) (symmetric-link-p msg-orig-addr))
 	 (rcvlog (format nil "BASE STATION BEACON"))
 	 (generate-node-message :node-reply))
-	((and (= msg-type (getf *msg-types* :node-beacon)) (not *base-station-p*))
+	((and (= msg-type (getf *msg-types* :node-beacon)))
 	 (rcvlog (format nil "NODE BEACON"))
 	 (update-link-set message addr+tlv)
 	 (update-duplicate-set message))
@@ -268,9 +272,9 @@
   (sb-ext:schedule-timer (sb-ext:make-timer #'check-duplicate-holding :name "Duplicate Set Timer" :thread t) 10 :repeat-interval (config-dup-hold-time *config*))
   (sb-ext:schedule-timer (sb-ext:make-timer #'check-link-set-validity :name "Link Set Timer" :thread t) 10 :repeat-interval (config-neighb-hold-time *config*))
   (sb-ext:schedule-timer (sb-ext:make-timer #'(lambda ()
-						(if *base-station-p*
-						    (new-beacon :base-station-beacon)
-						    (new-beacon :node-beacon)))
+						(when *base-station-p*
+						  (new-beacon :base-station-beacon))
+						(new-beacon :node-beacon))
 					    :thread t :name "Beacon Timer") 0 :repeat-interval (config-refresh-interval *config*))
   (sb-ext:schedule-timer (sb-ext:make-timer #'screen :thread t) 3 :repeat-interval (config-refresh-interval *config*)))
 
