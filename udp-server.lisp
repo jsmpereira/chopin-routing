@@ -31,6 +31,7 @@
    (multiple-value-bind (buf size host port)
        (usocket:socket-receive socket (make-array 128 :element-type '(unsigned-byte 8) :fill-pointer t) nil)
      (unless (host-address-p (usocket:host-byte-order host))
+       (rcvlog (format nil "BUF: ~A ~A => ~A" buf size host))
        (retrieve-message buf size)))))
 
 (defun writer (socket)

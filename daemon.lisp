@@ -92,10 +92,20 @@
     (sb-concurrency:enqueue (build-packet (make-message :msg-header msg-header :tlv-block tlvblock)) *out-buffer*)
     (sb-thread:signal-semaphore *semaphore*)))
 
-(defun generate-node-beacon ()
-  (sb-concurrency:enqueue 
-   (build-packet (make-message :msg-header (make-instance 'msg-header :msg-type :node-beacon :msg-hop-limit 1)
-			       :addr+tlv (build-address-block+tlv))) *out-buffer*))
+(defun generate-node-message (type)
+  (let ((packet nil))
+    (if (equal type :node-beacon)
+	(setf packet (build-packet (make-message :msg-header (make-instance 'msg-header :msg-type :node-beacon :msg-hop-limit 1)
+						 :addr+tlv (build-address-block+tlv))))
+	(setf packet (build-packet (make-message :msg-header (make-instance 'msg-header :msg-type :node-reply)))))
+    (sb-concurrency:enqueue packet *out-buffer*)))
+
+(defun forward-node-reply (msg-header addr+tlv)
+  (let* ((curr-path (addr-list-from-addr-block (addr+tlv-address-block addr+tlv)))
+	 (addr-block (make-address-block (adjoin (msg-orig-addr msg-header) curr-path))))
+    (sb-concurrency:enqueue (build-packet (make-message :msg-header (make-instance 'msg-header :msg-type :node-reply)
+							:addr+tlv (make-addr+tlv :address-block addr-block
+										 :tlv-block (make-address-block-tlv '(1))))) *out-buffer*)))
 
 (defun generate-base-station-beacon ()
   (sb-concurrency:enqueue
@@ -106,8 +116,7 @@
   (assert (valid-msg-type-p msg-type) ()
 	  "Invalid message type.")
   (case msg-type
-    (:node-beacon (generate-node-beacon))
-    (:node-reply 'nr)
+    (:node-beacon (generate-node-message :node-beacon))
     (:base-station-beacon (generate-base-station-beacon)))
   (sb-thread:signal-semaphore *semaphore*))
 
@@ -135,6 +144,7 @@
 	   (l-time (dt:second+ (dt:now) (* neighb-holding ref-interval)))
 	   (ls-hash (message-hash orig-addr))
 	   (current-link (gethash ls-hash *link-set*)))
+      (rcvlog (format nil "~A ~A~%" orig-addr current-link))
       (if (and current-link (equal (l-neighbor-iface-addr current-link) orig-addr))
 	  (progn (setf (l-time current-link) l-time)
 		 (when (and (addr+tlv message) (symmetric-p (addr+tlv message) orig-addr))
@@ -147,9 +157,7 @@
 (defun symmetric-p (addr+tlv orig-addr)
   (let ((addr-block (addr+tlv-address-block addr+tlv)))
     (with-slots (head mid) addr-block
-      (member orig-addr
-	      (loop for m in mid
-		    collect (usocket:host-byte-order (concatenate 'vector head m)))))))
+      (member orig-addr (addr-list-from-addr-block addr-block)))))
 
 (defun update-duplicate-set (message)
   "Create a `duplicate-tuple' from MSG-HEADER to be added to *DUPLICATE-SET*."
@@ -190,24 +198,29 @@
 			  (value x)) (tlv tlv-block))))
     (and (notany #'zerop tlvs) (notany #'host-address-p tlvs))))
 
+(defun symmetric-link-p (msg-orig-addr)
+  "Check if `msg-orig-addr' is a symmetric link."
+  (let ((link (gethash (message-hash msg-orig-addr) *link-set*)))
+    (when link
+      (= (getf *link-status* :symmetric) (l-status link)))))
+
 (defun process-message (message)
   "Update *ROUTING-TABLE*, *DUPLICATE-SET* and *LINK-SET*. If MSG-TYPE is :BASE-STATION-BEACON broadcast. If MSG-TYPE is :NODE-BEACON unicast to next-hop to Base Station. "
-  (let ((msg-type (msg-type (msg-header message)))
+  (let ((msg-header (msg-header message))
 	(addr+tlv (addr+tlv message)))
-    (incf *messages-received*)
-    (update-link-set message addr+tlv)
-    (update-duplicate-set message)
-    (unless *base-station-p* ; Base Station does not forward messages
-      (cond
-	((and (= msg-type (getf *msg-types* :base-station-beacon)))
-	 (rcvlog (format nil "BSB"))
-					;	   (generate-message :msg-header msg-header :msg-type msg-type :tlv-type :relay :tlv-block new-tlv-block)
-	 )
-	((and (= msg-type (getf *msg-types* :node-beacon)))
-	 (rcvlog (format nil "NODE BEACON"))
-					;	   (generate-message :msg-header msg-header :msg-type msg-type :tlv-type :path :tlv-block new-tlv-block)
-	 )
-	(t (rcvlog (format nil "!!!! THIS SHOULD NOT BE REACHED!!!!!")))))))
+    (with-slots (msg-type msg-orig-addr) msg-header
+      (incf *messages-received*)
+      (unless *base-station-p* ; Base Station does not forward messages
+	(cond
+	  ((and (= msg-type (getf *msg-types* :base-station-beacon)) (symmetric-link-p msg-orig-addr))
+	   (generate-node-message :node-reply))
+	  ((= msg-type (getf *msg-types* :node-beacon))
+	   (update-link-set message addr+tlv)
+	   (update-duplicate-set message)
+	   (format t "NODE BEACON"))
+	  ((= msg-type (getf *msg-types* :node-reply))
+	   (forward-node-reply msg-header addr+tlv))
+	  (t nil))))))
 
 (defun retrieve-message (buffer size)
   "Unserialize BUFFER and into PKT-HEADER, MSG-HEADER and TLV-BLOCK. Parse MSG-HEADER according to RFC 5444."

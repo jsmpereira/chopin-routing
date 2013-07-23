@@ -127,6 +127,11 @@
       (setf num-addr (length addr-list))
       (setf (values head mid) (address-block-head-mid addr-list head-length)))))
 
+(defmethod addr-list-from-addr-block ((addr-block address-block))
+  (with-slots (head mid) addr-block
+    (loop for m in mid
+	  collect (usocket:host-byte-order (concatenate 'vector head m)))))
+
 (defun address-block-head-mid (addr-list head-length)
   "Loop throuh `addr-list' and return head-length leftmost octets common to all the addresses and
 and remaining non-common octets of all addresses."
