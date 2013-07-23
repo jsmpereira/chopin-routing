@@ -133,39 +133,27 @@
     (make-instance 'tlv :tlv-type tlv-type :tlv-flags tlv-flags
 		   :length vlength :value (userial:unserialize :value :vlength vlength))))
 
-;;; addr-block + tlv-block
-(userial:make-accessor-serializer (:addr+tlv addr+tlv-instance (make-addr+tlv))
-				  :address-block addr+tlv-address-block
-				  :tlv-block addr+tlv-tlv-block)
-
-(defun serialize-addr+tlv (addr+tlv)
-  "Serialize each `addr+tlv' struct in the given `message' addr+tlv."
-  (userial:serialize :addr+tlv addr+tlv))
-
-(defun unserialize-addr+tlv ()
-  (userial:unserialize :addr+tlv))
-
 ;;; message
 (userial:define-serializer (:message message)
-  (with-slots (msg-header tlv-block addr+tlv) message
+  (with-slots (msg-header tlv-block address-block) message
     (userial:serialize :msg-header msg-header)
     (when tlv-block
       (userial:serialize :tlv-block tlv-block))
-    (when addr+tlv
-      (userial:serialize :addr+tlv addr+tlv)))
+    (when address-block
+      (userial:serialize :address-block address-block)))
   (userial:get-buffer))
 
 (userial:define-unserializer (:message)
   (let ((msg-header (userial:unserialize :msg-header))
 	(curr-length (userial:buffer-length))
-	(addr+tlv (userial:unserialize :addr+tlv)))
-    (if (zerop (num-addr (addr+tlv-address-block addr+tlv)))
+	(address-block (userial:unserialize :address-block)))
+    (if (zerop (num-addr (address-block address-block)))
 	(progn
 	  (userial:buffer-rewind)
 	  (userial:buffer-advance curr-length)
 	  (make-instance 'message :msg-header msg-header))
 	(progn
-	  (make-instance 'message :msg-header msg-header :addr+tlv addr+tlv)))))
+	  (make-instance 'message :msg-header msg-header :address-block address-block)))))
 
 ;;; packet
 (userial:make-accessor-serializer (:packet pkt-instance (make-instance 'packet))
