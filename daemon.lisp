@@ -305,7 +305,7 @@
 ~A~%
 ~A~%
 ------- REPLY BUFFER -----~%
-~A~%" (print-hash *routing-table*) (print-hash *duplicate-set*) (print-hash *link-set*) (sb-concurrency:list-queue-contents *out-buffer*) (sb-concurrency:list-queue-contents *reply-buffer*))))
+~A~%" (print-hash *routing-table*) (print-hash *duplicate-set*) (print-hash *link-set*) (sb-concurrency:list-queue-contents *out-buffer*) (sb-concurrency:queue-count *out-buffer*) (sb-concurrency:list-queue-contents *reply-buffer*))))
 
 (defun rcvlog (&rest rest)
   (with-open-file (s (merge-pathnames "received" (user-homedir-pathname)) :direction :output
