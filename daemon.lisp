@@ -43,7 +43,7 @@
     (make-instance 'tlv-block :tlvs-length (length buff) :tlvs tlvs)))
 
 (defun make-address-block (&key addr-list)
-  (unless (zerop (hash-table-count *link-set*))
+  (unless (and (zerop (hash-table-count *link-set*)) (not addr-list))
     (make-instance 'address-block
 		   :addr-list (or addr-list
 				  (mapcar #'l-neighbor-iface-addr
@@ -93,12 +93,12 @@
     (sb-thread:signal-semaphore *semaphore*)))
 
 (defun generate-node-message (type)
-  (if (equal type :node-beacon)
+  (if (or (equal type :base-station-beacon) (equal type :node-beacon))
       (sb-concurrency:enqueue (build-packet
-			       (make-message :msg-header (make-instance 'msg-header :msg-type :node-beacon :msg-hop-limit 1)
+			       (make-message :msg-header (make-instance 'msg-header :msg-type type :msg-hop-limit 1)
 					     :address-block (make-address-block))) *out-buffer*)
       (sb-concurrency:enqueue (build-packet
-			       (make-message :msg-header (make-instance 'msg-header :msg-type :node-reply)
+			       (make-message :msg-header (make-instance 'msg-header :msg-type type)
 					     :address-block (make-address-block :addr-list (list (usocket:host-byte-order (config-host-address *config*)))))) *reply-buffer*)))
 
 (defun forward-node-reply (msg-header address-block)
@@ -107,10 +107,10 @@
     (sb-concurrency:enqueue (build-packet (make-message :msg-header (make-instance 'msg-header :msg-type :node-reply)
 							:address-block addr-block)) *reply-buffer*)))
 
-(defun generate-base-station-beacon ()
+(defun generate-base-station-beacon (base-station-address)
   (sb-concurrency:enqueue
-   (build-packet (make-message :msg-header (make-instance 'msg-header :msg-type :base-station-beacon)
-			       :address-block (make-address-block :addr-list (list (usocket:host-byte-order (config-host-address *config*)))))) *out-buffer*))
+   (build-packet (make-message :msg-header (make-instance 'msg-header :msg-orig-addr (usocket:host-byte-order (config-host-address *config*)) :msg-type :base-station-beacon)
+			       :address-block (make-address-block :addr-list (list base-station-address)))) *out-buffer*))
 
 (defun new-beacon (msg-type)
   "Enqueue a beacon in *OUT-BUFFER* given `msg-type'."
@@ -118,7 +118,7 @@
 	  "Invalid message type.")
   (case msg-type
     (:node-beacon (generate-node-message :node-beacon))
-    (:base-station-beacon (generate-base-station-beacon)))
+    (:base-station-beacon (generate-node-message :base-station-beacon)))
   (sb-thread:signal-semaphore *semaphore*))
 
 (defun message-hash (&rest rest)
@@ -137,7 +137,7 @@
    (config-refresh-interval *config*)
    (config-neighb-hold-time *config*)))
 
-(defun update-link-set (message tlv-block)
+(defun update-link-set (message)
   "Add or update *LINK-SET* entry. For an existing entry update L-TIME. Otherwise, create new `link-tuple'."
   (multiple-value-bind (ref-interval neighb-holding)
       (link-set-params)
@@ -148,12 +148,10 @@
       (rcvlog (format nil "~A ~A~%" orig-addr current-link))
       (if (and current-link (equal (l-neighbor-iface-addr current-link) orig-addr))
 	  (progn (setf (l-time current-link) l-time)
-		 (when (and (symmetric-p (address-block message) (usocket:host-byte-order (config-host-address *config*))))
-		   (setf (l-status current-link) (getf *link-status* :symmetric))))
-	  (progn
-	    (setf (gethash ls-hash *link-set*) (make-instance 'link-tuple :neighbor-iface-addr orig-addr
-							      :time l-time))
-	    (update-routing-table (msg-header message)))))))
+		 (when (and (address-block message) (symmetric-p (address-block message) (usocket:host-byte-order (config-host-address *config*))))
+		   (setf (l-status current-link) (getf *link-status* :symmetric))
+		   (update-routing-table (msg-header message))))
+	  (setf (gethash ls-hash *link-set*) (make-instance 'link-tuple :neighbor-iface-addr orig-addr :time l-time))))))
 
 (defun symmetric-p (address-block orig-addr)
   (with-slots (head mid) address-block
@@ -211,18 +209,23 @@
     (with-slots (msg-type msg-orig-addr) msg-header
       (incf *messages-received*)
       (cond
-	((and (= msg-type (getf *msg-types* :base-station-beacon)) (not *base-station-p*) (symmetric-link-p msg-orig-addr))
+	((and (= msg-type (getf *msg-types* :base-station-beacon)) (not *base-station-p*))
 	 (rcvlog (format nil "BASE STATION BEACON"))
-	 (generate-node-message :node-reply))
+	 (when address-block
+	   (update-link-set message)
+	   (update-duplicate-set message)
+	   (generate-base-station-beacon (msg-orig-addr msg-header)))
+	 (when (symmetric-link-p msg-orig-addr)
+	   (generate-node-message :node-reply)))
 	((and (= msg-type (getf *msg-types* :node-beacon)))
 	 (rcvlog (format nil "NODE BEACON"))
-	 (update-link-set message address-block)
+	 (update-link-set message)
 	 (update-duplicate-set message))
 	((and (= msg-type (getf *msg-types* :node-reply)))
 	 (rcvlog (format nil "NODE REPLY"))
 	 (if *base-station-p*
 	     (progn
-	       (update-link-set message address-block)
+	       (update-link-set message)
 	       (update-duplicate-set message))
 	     (forward-node-reply msg-header address-block)))
 	(t nil)))))
@@ -241,9 +244,9 @@
 	  ((check-duplicate-set msg-type orig-addr seq-num) (rcvlog (format nil "DUPLICATE"))) ; discard
 	  (t (process-message (message packet))))))))
 
-(defun out-buffer-get (&key (buffer *out-buffer*))
+(defun out-buffer-get ()
   "Dequeue element from *OUT-BUFFER* and serialize it into a PACKET."
-  (let ((packet (sb-concurrency:dequeue buffer)))
+  (let ((packet (sb-concurrency:dequeue *out-buffer*)))
     (rcvlog (format nil "OUT BUFFER ~A" packet))
     (when packet
       (serialize-packet packet))))
@@ -299,6 +302,7 @@
 ------ Link Set -----~%
 ~A~%
 ------- OUT BUFFER -----~%
+~A~%
 ~A~%
 ------- REPLY BUFFER -----~%
 ~A~%" (print-hash *routing-table*) (print-hash *duplicate-set*) (print-hash *link-set*) (sb-concurrency:list-queue-contents *out-buffer*) (sb-concurrency:list-queue-contents *reply-buffer*))))

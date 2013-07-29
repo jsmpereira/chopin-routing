@@ -39,7 +39,7 @@
 (defmethod print-object ((object packet) stream)
   (print-unreadable-object (object stream :type t)
     (with-slots (message) object
-      (format stream "PKT-HEADER => ~A MESSAGE => TYPE: ~A SEQ: ~A ORIG: ~A BLOCK: ~A" (pkt-header object) (msg-type (msg-header message)) (msg-seq-num (msg-header message)) (usocket:hbo-to-dotted-quad (msg-orig-addr (msg-header message))) (address-block message)))))
+      (format stream "~A => ~A MESSAGE => TYPE: ~A SEQ: ~A ORIG: ~A BLOCK: ~A" (dt:now) (pkt-header object) (msg-type (msg-header message)) (msg-seq-num (msg-header message)) (usocket:hbo-to-dotted-quad (msg-orig-addr (msg-header message))) (address-block message)))))
 
 (defclass pkt-header ()
   ((version :initarg :version
