@@ -147,7 +147,7 @@
   (let ((msg-header (userial:unserialize :msg-header))
 	(curr-length (userial:buffer-length))
 	(address-block (userial:unserialize :address-block)))
-    (if (zerop (num-addr (address-block address-block)))
+    (if (zerop (num-addr address-block))
 	(progn
 	  (userial:buffer-rewind)
 	  (userial:buffer-advance curr-length)
