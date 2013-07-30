@@ -92,14 +92,15 @@
     (sb-concurrency:enqueue (build-packet (make-message :msg-header msg-header :tlv-block tlvblock)) *out-buffer*)
     (sb-thread:signal-semaphore *semaphore*)))
 
-(defun generate-node-message (type)
+(defun generate-node-message (type &optional msg-orig-addr)
   (if (or (equal type :base-station-beacon) (equal type :node-beacon))
       (sb-concurrency:enqueue (build-packet
 			       (make-message :msg-header (make-instance 'msg-header :msg-type type :msg-hop-limit 1)
 					     :address-block (make-address-block))) *out-buffer*)
-      (sb-concurrency:enqueue (build-packet
-			       (make-message :msg-header (make-instance 'msg-header :msg-type type)
-					     :address-block (make-address-block :addr-list (list (usocket:host-byte-order (config-host-address *config*)))))) *reply-buffer*))
+      (sb-concurrency:enqueue (make-reply-struct :packet (build-packet
+							  (make-message :msg-header (make-instance 'msg-header :msg-type type)
+									:address-block (make-address-block :addr-list (list (usocket:host-byte-order (config-host-address *config*))))))
+						 :destination msg-orig-addr) *reply-buffer*))
   (sb-thread:signal-semaphore *semaphore*))
 
 (defun forward-node-reply (msg-header address-block)
@@ -205,6 +206,11 @@
     (when link
       (= (getf *link-status* :symmetric) (l-status link)))))
 
+(defun neighbour-p (msg-orig-addr)
+  "Check if `msg-orig-addr' belongs to a neighbour route."
+  (let ((route (gethash (message-hash msg-orig-addr) *routing-table*)))
+    (and route (= (rt-entry-hop-count route) 1))))
+
 (defun process-message (message)
   "Update *ROUTING-TABLE*, *DUPLICATE-SET* and *LINK-SET*. If MSG-TYPE is :BASE-STATION-BEACON broadcast. If MSG-TYPE is :NODE-BEACON unicast to next-hop to Base Station. "
   (let ((msg-header (msg-header message))
@@ -218,8 +224,8 @@
 	   (update-link-set message)
 	   (update-duplicate-set message)
 	   (generate-base-station-beacon (msg-orig-addr msg-header)))
-	 (when (symmetric-link-p msg-orig-addr)
-	   (generate-node-message :node-reply)))
+	 (when (and (symmetric-link-p msg-orig-addr) (not (neighbour-p msg-orig-addr)))
+	   (generate-node-message :node-reply (msg-orig-addr msg-header))))
 	((and (= msg-type (getf *msg-types* :node-beacon)))
 	 (rcvlog (format nil "NODE BEACON"))
 	 (update-link-set message)
@@ -254,6 +260,13 @@
     (when packet
       (serialize-packet packet))))
 
+(defun reply-buffer-get ()
+  "Dequeue element from *REPLY-BUFFER*. Return serialized packet and destination.
+Returned packet will be unicasted."
+  (let ((reply (sb-concurrency:dequeue *reply-buffer*)))
+    (when reply
+      (values (serialize-packet (reply-struct-packet reply)) (reply-struct-destination reply)))))
+
 ;;; timer / event scheduling
 
 (defun check-duplicate-holding ()
@@ -268,7 +281,8 @@
 	when (dt:time>= (dt:now) (slot-value link-tuple 'l-time))
 	do (progn
 	     (remhash key *link-set*)
-	     (del-routing-table (l-neighbor-iface-addr link-tuple)))))
+	     (when (symmetric-link-p (l-neighbor-iface-addr link-tuple))
+	       (del-routing-table (l-neighbor-iface-addr link-tuple))))))
 
 (defun start-timers ()
   "Setup and start timers."

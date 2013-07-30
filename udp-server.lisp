@@ -5,6 +5,7 @@
 
 (defvar *writer-thread* nil)
 (defvar *reader-thread* nil)
+(defvar *replier-thread* nil)
 (defvar *semaphore* nil)
 (defparameter *broadcast-socket* nil)
 
@@ -24,7 +25,18 @@
 					      (unwind-protect
 						   (reader socket)
 						(usocket:socket-close socket))) :name "READER Thread"))
+    (setf *replier-thread* (bt:make-thread #'(lambda ()
+    					       (unwind-protect
+    						    (replier socket)
+    						 (usocket:socket-close socket))) :name "REPLIER Thread"))
     (start-timers)))
+
+(defun replier (socket)
+  (loop
+   (multiple-value-bind (packet destination) (reply-buffer-get)
+     (when packet
+       (usocket:socket-send socket packet (length packet) :host (usocket:hbo-to-dotted-quad destination)
+			    :port (config-port *config*))))))
 
 (defun reader (socket)
   (loop

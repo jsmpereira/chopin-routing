@@ -5,6 +5,8 @@
 
 (defstruct rt-entry destination next-hop hop-count seq-num)
 
+(defstruct reply-struct destination packet)
+
 (defclass duplicate-tuple ()
   ((orig-addr :initarg :orig-addr :accessor orig-addr)
    (msg-type :initarg :msg-type :accessor msg-type)
