@@ -92,8 +92,7 @@
       (sb-concurrency:enqueue (make-reply-struct :packet (build-packet
 							  (make-message :msg-header (make-instance 'msg-header :msg-type type)
 									:address-block (make-address-block :addr-list (list (usocket:host-byte-order (config-host-address *config*))))))
-						 :destination msg-orig-addr) *reply-buffer*))
-  (sb-thread:signal-semaphore *semaphore*))
+						 :destination msg-orig-addr) *reply-buffer*)))
 
 (defun forward-node-reply (msg-header address-block)
   (let* ((curr-path (addr-list-from-addr-block address-block))
