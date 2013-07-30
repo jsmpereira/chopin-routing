@@ -50,14 +50,6 @@
 					  (alexandria:hash-table-values *link-set*))))))
 
 
-(defun build-address-block+tlv ()
-  (unless (zerop (hash-table-count *link-set*))
-    (let* ((links (alexandria:hash-table-values *link-set*))
-	   (addr-list (mapcar #'l-neighbor-iface-addr links))
-	   (addr-status (mapcar #'l-status links)))
-      (make-addr+tlv :address-block (make-address-block addr-list)
-		     :tlv-block (make-address-block-tlv addr-status)))))
-
 (defun make-message (&key msg-header tlv-block address-block)
   (make-instance 'message :msg-header msg-header :tlv-block tlv-block :address-block address-block))
 
@@ -149,7 +141,6 @@
 	   (l-time (dt:second+ (dt:now) (* neighb-holding ref-interval)))
 	   (ls-hash (message-hash orig-addr))
 	   (current-link (gethash ls-hash *link-set*)))
-      (rcvlog (format nil "~A ~A~%" orig-addr current-link))
       (if (and current-link (equal (l-neighbor-iface-addr current-link) orig-addr))
 	  (progn (setf (l-time current-link) l-time)
 		 (when (and (address-block message) (symmetric-p (address-block message) (usocket:host-byte-order (config-host-address *config*))))
@@ -256,7 +247,6 @@
 (defun out-buffer-get ()
   "Dequeue element from *OUT-BUFFER* and serialize it into a PACKET."
   (let ((packet (sb-concurrency:dequeue *out-buffer*)))
-    (rcvlog (format nil "OUT BUFFER ~A" packet))
     (when packet
       (serialize-packet packet))))
 
