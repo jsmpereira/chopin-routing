@@ -97,14 +97,15 @@
 (defun forward-node-reply (msg-header address-block)
   (let* ((curr-path (addr-list-from-addr-block address-block))
 	 (addr-block (make-address-block :addr-list (adjoin (msg-orig-addr msg-header) curr-path))))
-    (sb-concurrency:enqueue (build-packet (make-message :msg-header (make-instance 'msg-header :msg-type :node-reply)
-							:address-block addr-block)) *reply-buffer*))
+    (sb-concurrency:enqueue (make-reply-struct :packet (build-packet (make-message :msg-header (make-instance 'msg-header :msg-type :node-reply)
+										   :address-block addr-block))
+					       :destination (msg-orig-addr msg-header)) *reply-buffer*))
   (sb-thread:signal-semaphore *semaphore*))
 
 (defun generate-base-station-beacon (base-station-address)
   (sb-concurrency:enqueue
-   (build-packet (make-message :msg-header (make-instance 'msg-header :msg-orig-addr (usocket:host-byte-order (config-host-address *config*)) :msg-type :base-station-beacon)
-			       :address-block (make-address-block :addr-list (list base-station-address)))) *out-buffer*)
+   (build-packet (make-message :msg-header (make-instance 'msg-header :msg-hop-count (1+ (msg-hop-count msg-header)) :msg-orig-addr (usocket:host-byte-order (config-host-address *config*)) :msg-type :base-station-beacon)
+			       :address-block (make-address-block :addr-list (list (msg-orig-addr msg-header))))) *out-buffer*)
   (sb-thread:signal-semaphore *semaphore*))
 
 (defun new-beacon (msg-type)
@@ -205,7 +206,7 @@
   "Update *ROUTING-TABLE*, *DUPLICATE-SET* and *LINK-SET*. If MSG-TYPE is :BASE-STATION-BEACON broadcast. If MSG-TYPE is :NODE-BEACON unicast to next-hop to Base Station. "
   (let ((msg-header (msg-header message))
 	(address-block (address-block message)))
-    (with-slots (msg-type msg-orig-addr) msg-header
+    (with-slots (msg-type msg-orig-addr msg-hop-count) msg-header
       (incf *messages-received*)
       (cond
 	((and (= msg-type (getf *msg-types* :base-station-beacon)) (not *base-station-p*))
@@ -214,7 +215,8 @@
 	   (when address-block
 	     (update-link-set message)
 	     (update-duplicate-set message)
-	     (generate-base-station-beacon (msg-orig-addr msg-header)))
+	     (rcvlog (format nil "Retransmitting bs beacon from ~A. HOPS ~A" (usocket:hbo-to-dotted-quad msg-orig-addr) msg-hop-count))
+	     (generate-base-station-beacon msg-header))
 	   (when (and (symmetric-link-p msg-orig-addr) (not (neighbour-p bs-addr)))
 	     (generate-node-message :node-reply (msg-orig-addr msg-header)))))
 	((and (= msg-type (getf *msg-types* :node-beacon)))
