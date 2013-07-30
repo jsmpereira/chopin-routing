@@ -210,13 +210,14 @@
       (incf *messages-received*)
       (cond
 	((and (= msg-type (getf *msg-types* :base-station-beacon)) (not *base-station-p*))
-	 (rcvlog (format nil "BASE STATION BEACON"))
-	 (when address-block
-	   (update-link-set message)
-	   (update-duplicate-set message)
-	   (generate-base-station-beacon (msg-orig-addr msg-header)))
-	 (when (and (symmetric-link-p msg-orig-addr) (not (neighbour-p msg-orig-addr)))
-	   (generate-node-message :node-reply (msg-orig-addr msg-header))))
+	 (let ((bs-addr (msg-orig-addr msg-header)))
+	   (rcvlog (format nil "BASE STATION BEACON"))
+	   (when address-block
+	     (update-link-set message)
+	     (update-duplicate-set message)
+	     (generate-base-station-beacon (msg-orig-addr msg-header)))
+	   (when (and (symmetric-link-p msg-orig-addr) (not (neighbour-p bs-addr)))
+	     (generate-node-message :node-reply (msg-orig-addr msg-header)))))
 	((and (= msg-type (getf *msg-types* :node-beacon)))
 	 (rcvlog (format nil "NODE BEACON"))
 	 (update-link-set message)
@@ -235,7 +236,6 @@
   (let* ((packet (unserialize-packet buffer)))
     (when (= size (length buffer)) ;; read size must match unserialized length
       (with-accessors ((msg-type msg-type) (orig-addr msg-orig-addr) (seq-num msg-seq-num) (hop-limit msg-hop-limit) (hop-count msg-hop-count)) (msg-header (message packet))
-	(rcvlog (format nil "~A ~A ~A ~A ~A~%" msg-type orig-addr seq-num hop-limit hop-count))
 	(cond
 	  ((not (member msg-type *msg-types*)) (rcvlog (format nil "UNRECOGNIZED TYPE"))) ;discard
 	  ((= hop-limit 0) nil) ; discard
