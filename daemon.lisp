@@ -102,7 +102,8 @@
 					       :destination (msg-orig-addr msg-header)) *reply-buffer*))
   (sb-thread:signal-semaphore *semaphore*))
 
-(defun generate-base-station-beacon (base-station-address)
+(defun generate-base-station-beacon (msg-header)
+  (rcvlog (format nil "Retransmitting BS beacon."))
   (sb-concurrency:enqueue
    (build-packet (make-message :msg-header (make-instance 'msg-header :msg-hop-count (1+ (msg-hop-count msg-header)) :msg-orig-addr (usocket:host-byte-order (config-host-address *config*)) :msg-type :base-station-beacon)
 			       :address-block (make-address-block :addr-list (list (msg-orig-addr msg-header))))) *out-buffer*)
