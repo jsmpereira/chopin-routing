@@ -99,18 +99,21 @@
 					     :address-block (make-address-block))) *out-buffer*)
       (sb-concurrency:enqueue (build-packet
 			       (make-message :msg-header (make-instance 'msg-header :msg-type type)
-					     :address-block (make-address-block :addr-list (list (usocket:host-byte-order (config-host-address *config*)))))) *reply-buffer*)))
+					     :address-block (make-address-block :addr-list (list (usocket:host-byte-order (config-host-address *config*)))))) *reply-buffer*))
+  (sb-thread:signal-semaphore *semaphore*))
 
 (defun forward-node-reply (msg-header address-block)
   (let* ((curr-path (addr-list-from-addr-block address-block))
 	 (addr-block (make-address-block :addr-list (adjoin (msg-orig-addr msg-header) curr-path))))
     (sb-concurrency:enqueue (build-packet (make-message :msg-header (make-instance 'msg-header :msg-type :node-reply)
-							:address-block addr-block)) *reply-buffer*)))
+							:address-block addr-block)) *reply-buffer*))
+  (sb-thread:signal-semaphore *semaphore*))
 
 (defun generate-base-station-beacon (base-station-address)
   (sb-concurrency:enqueue
    (build-packet (make-message :msg-header (make-instance 'msg-header :msg-orig-addr (usocket:host-byte-order (config-host-address *config*)) :msg-type :base-station-beacon)
-			       :address-block (make-address-block :addr-list (list base-station-address)))) *out-buffer*))
+			       :address-block (make-address-block :addr-list (list base-station-address)))) *out-buffer*)
+  (sb-thread:signal-semaphore *semaphore*))
 
 (defun new-beacon (msg-type)
   "Enqueue a beacon in *OUT-BUFFER* given `msg-type'."
