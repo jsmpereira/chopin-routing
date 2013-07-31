@@ -211,15 +211,16 @@
       (incf *messages-received*)
       (cond
 	((and (= msg-type (getf *msg-types* :base-station-beacon)) (not *base-station-p*))
-	 (let ((bs-addr (msg-orig-addr msg-header)))
-	   (rcvlog (format nil "BASE STATION BEACON"))
-	   (when address-block
-	     (update-link-set message)
-	     (update-duplicate-set message)
-	     (rcvlog (format nil "Retransmitting bs beacon from ~A. HOPS ~A" (usocket:hbo-to-dotted-quad msg-orig-addr) msg-hop-count))
-	     (generate-base-station-beacon msg-header))
-	   (when (and (symmetric-link-p msg-orig-addr) (not (neighbour-p bs-addr)))
-	     (generate-node-message :node-reply (msg-orig-addr msg-header)))))
+	 (when (selective-broadcast msg-type msg-orig-addr)
+	   (let ((bs-addr msg-orig-addr))
+	     (rcvlog (format nil "BASE STATION BEACON"))
+	     (when address-block
+	       (update-link-set message)
+	       (update-duplicate-set message)
+	       (rcvlog (format nil "Retransmitting bs beacon from ~A. HOPS ~A" (usocket:hbo-to-dotted-quad msg-orig-addr) msg-hop-count))
+	       (generate-base-station-beacon msg-header))
+	     (when (and (symmetric-link-p msg-orig-addr) (not (neighbour-p bs-addr)))
+	       (generate-node-message :node-reply msg-orig-addr)))))
 	((and (= msg-type (getf *msg-types* :node-beacon)))
 	 (rcvlog (format nil "NODE BEACON"))
 	 (update-link-set message)
@@ -232,6 +233,12 @@
 	       (update-duplicate-set message))
 	     (forward-node-reply msg-header address-block)))
 	(t nil)))))
+
+(defun selective-broadcast (msg-type msg-orig-addr)
+  "Unless expired, only process base station beacons from a previously known source."
+  (loop for key being the hash-keys in *duplicate-set* using (hash-value val)
+	when (= (msg-type val) msg-type)
+	return (= (orig-addr val) msg-orig-addr)))
 
 (defun retrieve-message (buffer size)
   "Unserialize BUFFER and into PKT-HEADER, MSG-HEADER and TLV-BLOCK. Parse MSG-HEADER according to RFC 5444."
