@@ -237,8 +237,9 @@
 (defun selective-broadcast (msg-type msg-orig-addr)
   "Unless expired, only process base station beacons from a previously known source."
   (loop for key being the hash-keys in *duplicate-set* using (hash-value val)
-	when (= (msg-type val) msg-type)
-	return (= (orig-addr val) msg-orig-addr)))
+	return (if (= (msg-type val) msg-type)
+		   (= (orig-addr val) msg-orig-addr)
+		   t)))
 
 (defun retrieve-message (buffer size)
   "Unserialize BUFFER and into PKT-HEADER, MSG-HEADER and TLV-BLOCK. Parse MSG-HEADER according to RFC 5444."
