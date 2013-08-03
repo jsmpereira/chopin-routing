@@ -86,13 +86,18 @@
 
 (defun generate-node-message (type &optional msg-orig-addr)
   (if (or (equal type :base-station-beacon) (equal type :node-beacon))
-      (sb-concurrency:enqueue (build-packet
-			       (make-message :msg-header (make-instance 'msg-header :msg-type type :msg-hop-limit 1)
-					     :address-block (make-address-block))) *out-buffer*)
-      (sb-concurrency:enqueue (make-reply-struct :packet (build-packet
-							  (make-message :msg-header (make-instance 'msg-header :msg-type type)
-									:address-block (make-address-block :addr-list (list (usocket:host-byte-order (config-host-address *config*))))))
-						 :destination msg-orig-addr) *reply-buffer*)))
+      (progn
+	(rcvlog (format nil "generating ~A beacon" type))
+	(sb-concurrency:enqueue (build-packet
+				 (make-message :msg-header (make-instance 'msg-header :msg-type type :msg-hop-limit 1)
+					       :address-block (make-address-block))) *out-buffer*)
+	(sb-thread:signal-semaphore *semaphore*))
+      (progn
+	(sb-concurrency:enqueue (make-reply-struct :packet (build-packet
+							    (make-message :msg-header (make-instance 'msg-header :msg-type type :msg-orig-addr msg-orig-addr)
+									  :address-block (make-address-block :addr-list (list (usocket:host-byte-order (config-host-address *config*))))))
+						   :destination msg-orig-addr) *reply-buffer*)
+	(sb-thread:signal-semaphore *reply-semaphore*))))
 
 (defun forward-node-reply (msg-header address-block)
   (let* ((curr-path (addr-list-from-addr-block address-block))
@@ -115,8 +120,7 @@
 	  "Invalid message type.")
   (case msg-type
     (:node-beacon (generate-node-message :node-beacon))
-    (:base-station-beacon (generate-node-message :base-station-beacon)))
-  (sb-thread:signal-semaphore *semaphore*))
+    (:base-station-beacon (generate-node-message :base-station-beacon))))
 
 (defun message-hash (&rest rest)
   "Generate hash key based on passed arguments."

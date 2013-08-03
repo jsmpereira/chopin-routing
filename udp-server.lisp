@@ -7,6 +7,7 @@
 (defvar *reader-thread* nil)
 (defvar *replier-thread* nil)
 (defvar *semaphore* nil)
+(defvar *reply-semaphore* nil)
 (defparameter *broadcast-socket* nil)
 
 (defun start-server ()
@@ -17,6 +18,7 @@
     (setf (usocket:socket-option socket :broadcast) t)
     (setf *broadcast-socket* socket)
     (setf *semaphore* (sb-thread:make-semaphore))
+    (setf *reply-semaphore* (sb-thread:make-semaphore))
     (setf *writer-thread* (bt:make-thread #'(lambda ()
 					      (unwind-protect
 						   (writer socket)
@@ -36,7 +38,8 @@
    (multiple-value-bind (packet destination) (reply-buffer-get)
      (when packet
        (usocket:socket-send socket packet (length packet) :host (usocket:hbo-to-dotted-quad destination)
-			    :port (config-port *config*))))))
+			    :port (config-port *config*))))
+   (sb-thread:wait-on-semaphore *reply-semaphore*)))
 
 (defun reader (socket)
   (loop
