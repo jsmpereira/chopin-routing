@@ -108,7 +108,6 @@
   (sb-thread:signal-semaphore *semaphore*))
 
 (defun generate-base-station-beacon (msg-header)
-  (rcvlog (format nil "Retransmitting BS beacon."))
   (sb-concurrency:enqueue
    (build-packet (make-message :msg-header (make-instance 'msg-header :msg-hop-count (1+ (msg-hop-count msg-header)) :msg-orig-addr (usocket:host-byte-order (config-host-address *config*)) :msg-type :base-station-beacon)
 			       :address-block (make-address-block :addr-list (list (msg-orig-addr msg-header))))) *out-buffer*)
@@ -240,10 +239,12 @@
 
 (defun selective-broadcast (msg-type msg-orig-addr)
   "Unless expired, only process base station beacons from a previously known source."
-  (loop for key being the hash-keys in *duplicate-set* using (hash-value val)
-	return (if (= (msg-type val) msg-type)
-		   (= (orig-addr val) msg-orig-addr)
-		   t)))
+  (if (zerop (hash-table-count *duplicate-set*))
+      t
+      (loop for key being the hash-keys in *duplicate-set* using (hash-value val)
+	    return (if (= (msg-type val) msg-type)
+		       (= (orig-addr val) msg-orig-addr)
+		       t))))
 
 (defun retrieve-message (buffer size)
   "Unserialize BUFFER and into PKT-HEADER, MSG-HEADER and TLV-BLOCK. Parse MSG-HEADER according to RFC 5444."
