@@ -229,12 +229,12 @@
 	 (update-link-set message)
 	 (update-duplicate-set message))
 	((and (= msg-type (getf *msg-types* :node-reply)))
-	 (rcvlog (format nil "NODE REPLY"))
-	 (if *base-station-p*
-	     (progn
-	       (update-link-set message)
-	       (update-duplicate-set message))
-	     (forward-node-reply msg-header address-block)))
+	 (when (selective-broadcast msg-type msg-orig-addr)
+	   (rcvlog (format nil "NODE REPLY to ~A" (usocket:hbo-to-dotted-quad msg-orig-addr)))
+	   (if *base-station-p*
+	       (progn
+		 (update-link-set message)
+		 (update-duplicate-set message)))))
 	(t nil)))))
 
 (defun selective-broadcast (msg-type msg-orig-addr)
