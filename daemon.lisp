@@ -152,7 +152,7 @@
 	   (current-link (gethash ls-hash *link-set*)))
       (if (and current-link (equal (l-neighbor-iface-addr current-link) orig-addr))
 	  (progn (setf (l-time current-link) l-time)
-		 (when (or (= (msg-type message) (getf *msg-types* :base-station-beacon)) (and (address-block message) (addr-in-addr-block-p (address-block message) (usocket:host-byte-order (config-host-address *config*)))))
+		 (when (or (= (msg-type (msg-header message)) (getf *msg-types* :base-station-beacon)) (and (address-block message) (addr-in-addr-block-p (address-block message) (usocket:host-byte-order (config-host-address *config*)))))
 		   (setf (l-status current-link) (getf *link-status* :symmetric))
 		   (update-routing-table (msg-header message))))
 	  (setf (gethash ls-hash *link-set*) (make-instance 'link-tuple :neighbor-iface-addr orig-addr :time l-time))))))
