@@ -41,7 +41,7 @@
 (defmethod print-object ((object packet) stream)
   (print-unreadable-object (object stream :type t)
     (with-slots (message) object
-      (format stream "~A => ~A MESSAGE => TYPE: ~A SEQ: ~A ORIG: ~A BLOCK: ~A" (dt:now) (pkt-header object) (msg-type (msg-header message)) (msg-seq-num (msg-header message)) (usocket:hbo-to-dotted-quad (msg-orig-addr (msg-header message))) (address-block message)))))
+      (format stream "~A MESSAGE => TYPE: ~A SEQ: ~A ORIG: ~A BLOCK: ~A" (pkt-header object) (msg-type (msg-header message)) (msg-seq-num (msg-header message)) (usocket:hbo-to-dotted-quad (msg-orig-addr (msg-header message))) (address-block message)))))
 
 (defclass pkt-header ()
   ((version :initarg :version
@@ -97,6 +97,7 @@
    :msg-addr-length #b0011 ; IPv4
    :msg-size 0
    :msg-orig-addr (usocket:host-byte-order (config-host-address *config*))
+
    :msg-hop-limit (config-hop-limit *config*)
    :msg-hop-count 0
    :msg-seq-num *msg-seq-num*))
@@ -132,8 +133,7 @@
 	  collect (usocket:host-byte-order (concatenate 'vector head m)))))
 
 (defun address-block-head-mid (addr-list head-length)
-  "Loop throuh `addr-list' and return head-length leftmost octets common to all the addresses and
-and remaining non-common octets of all addresses."
+  "Loop throuh `addr-list' and return head-length leftmost octets common to all the addresses and remaining non-common octets of all addresses."
   (loop for addr in addr-list 
 	for octets = (usocket:integer-to-octet-buffer addr (make-array 4 :element-type '(unsigned-byte 8)) 4)
 	collect (subseq octets head-length) into mid

@@ -43,6 +43,7 @@
     (make-instance 'tlv-block :tlvs-length (length buff) :tlvs tlvs)))
 
 (defun make-address-block (&key addr-list)
+  "Create an instance of `address-block' from addr-list if supplied or *link-set*."
   (unless (and (zerop (hash-table-count *link-set*)) (not addr-list))
     (make-instance 'address-block
 		   :addr-list (or addr-list
@@ -85,19 +86,21 @@
     (sb-thread:signal-semaphore *semaphore*)))
 
 (defun generate-node-message (type &optional msg-orig-addr)
-  (if (or (equal type :base-station-beacon) (equal type :node-beacon))
-      (progn
-	(rcvlog (format nil "generating ~A beacon" type))
-	(sb-concurrency:enqueue (build-packet
-				 (make-message :msg-header (make-instance 'msg-header :msg-type type :msg-hop-limit 1)
-					       :address-block (make-address-block))) *out-buffer*)
-	(sb-thread:signal-semaphore *semaphore*))
-      (progn
-	(sb-concurrency:enqueue (make-reply-struct :packet (build-packet
-							    (make-message :msg-header (make-instance 'msg-header :msg-type type :msg-orig-addr msg-orig-addr)
-									  :address-block (make-address-block :addr-list (list (usocket:host-byte-order (config-host-address *config*))))))
-						   :destination msg-orig-addr) *reply-buffer*)
-	(sb-thread:signal-semaphore *reply-semaphore*))))
+  (case type
+    (:base-station-beacon (progn (sb-concurrency:enqueue (build-packet
+							  (make-message :msg-header (make-instance 'msg-header :msg-type type :msg-hop-limit 1)
+									:address-block (make-address-block :addr-list (list (usocket:host-byte-order (config-host-address *config*)))))) *out-buffer*)
+				 (sb-thread:signal-semaphore *semaphore*)))
+    (:node-beacon (progn (sb-concurrency:enqueue (build-packet
+						  (make-message :msg-header (make-instance 'msg-header :msg-type type :msg-hop-limit 1)
+								:address-block (make-address-block))) *out-buffer*)
+			 (sb-thread:signal-semaphore *semaphore*)))
+    (:node-reply (progn
+		     (sb-concurrency:enqueue (make-reply-struct :packet (build-packet
+									 (make-message :msg-header (make-instance 'msg-header :msg-type type :msg-orig-addr msg-orig-addr)
+										       :address-block (make-address-block :addr-list (list (usocket:host-byte-order (config-host-address *config*))))))
+								:destination msg-orig-addr) *reply-buffer*)
+		     (sb-thread:signal-semaphore *reply-semaphore*)))))
 
 (defun forward-node-reply (msg-header address-block)
   (let* ((curr-path (addr-list-from-addr-block address-block))
@@ -107,10 +110,12 @@
 					       :destination (msg-orig-addr msg-header)) *reply-buffer*))
   (sb-thread:signal-semaphore *semaphore*))
 
-(defun generate-base-station-beacon (msg-header)
-  (sb-concurrency:enqueue
-   (build-packet (make-message :msg-header (make-instance 'msg-header :msg-hop-count (1+ (msg-hop-count msg-header)) :msg-orig-addr (usocket:host-byte-order (config-host-address *config*)) :msg-type :base-station-beacon)
-			       :address-block (make-address-block :addr-list (list (msg-orig-addr msg-header))))) *out-buffer*)
+(defun generate-base-station-beacon (message)
+  (with-slots (msg-header address-block) message
+    (sb-concurrency:enqueue
+     (build-packet (make-message :msg-header (make-instance 'msg-header :msg-hop-count (1+ (msg-hop-count msg-header))
+							    :msg-orig-addr (usocket:host-byte-order (config-host-address *config*)) :msg-type :base-station-beacon)
+				 :address-block (make-address-block :addr-list (adjoin (msg-orig-addr msg-header) (addr-list-from-addr-block address-block))))) *out-buffer*))
   (sb-thread:signal-semaphore *semaphore*))
 
 (defun new-beacon (msg-type)
@@ -147,12 +152,12 @@
 	   (current-link (gethash ls-hash *link-set*)))
       (if (and current-link (equal (l-neighbor-iface-addr current-link) orig-addr))
 	  (progn (setf (l-time current-link) l-time)
-		 (when (and (address-block message) (symmetric-p (address-block message) (usocket:host-byte-order (config-host-address *config*))))
+		 (when (or (= (msg-type message) (getf *msg-types* :base-station-beacon)) (and (address-block message) (addr-in-addr-block-p (address-block message) (usocket:host-byte-order (config-host-address *config*)))))
 		   (setf (l-status current-link) (getf *link-status* :symmetric))
 		   (update-routing-table (msg-header message))))
 	  (setf (gethash ls-hash *link-set*) (make-instance 'link-tuple :neighbor-iface-addr orig-addr :time l-time))))))
 
-(defun symmetric-p (address-block orig-addr)
+(defun addr-in-addr-block-p (address-block orig-addr)
   (with-slots (head mid) address-block
     (member orig-addr (addr-list-from-addr-block address-block))))
 
@@ -169,6 +174,7 @@
   (add-route (usocket:hbo-to-dotted-quad destination) (usocket:hbo-to-dotted-quad gateway) iface metric))
 
 (defun next-hop (msg-header)
+  "Deternime next-hop. It's either 0 for direct links or `msg-orig-addr' for remote ones."
   (cond ((= (msg-type msg-header) (getf *msg-types* :base-station-beacon)) (msg-orig-addr msg-header))
 	(t 0)))
 
@@ -214,16 +220,16 @@
       (incf *messages-received*)
       (cond
 	((and (= msg-type (getf *msg-types* :base-station-beacon)) (not *base-station-p*))
-	 (when (selective-broadcast msg-type msg-orig-addr)
-	   (let ((bs-addr msg-orig-addr))
-	     (rcvlog (format nil "BASE STATION BEACON"))
-	     (when address-block
-	       (update-link-set message)
-	       (update-duplicate-set message)
-	       (rcvlog (format nil "Retransmitting bs beacon from ~A. HOPS ~A" (usocket:hbo-to-dotted-quad msg-orig-addr) msg-hop-count))
-	       (generate-base-station-beacon msg-header))
-	     (when (and (symmetric-link-p msg-orig-addr) (not (neighbour-p bs-addr)))
-	       (generate-node-message :node-reply msg-orig-addr)))))
+	 (unless (addr-in-addr-block-p address-block (usocket:host-byte-order (config-host-address *config*)))
+	   (rcvlog (format nil "BASE STATION BEACON"))
+	   (rcvlog (format nil "addr block ~A" address-block))
+	   (update-link-set message)
+	   (update-duplicate-set message)
+	   (rcvlog (format nil "Retransmitting bs beacon from ~A. HOPS ~A" (usocket:hbo-to-dotted-quad msg-orig-addr) msg-hop-count))
+	   (generate-base-station-beacon message)
+	   ;; (when (and (symmetric-link-p msg-orig-addr) (not (neighbour-p bs-addr)))
+	   ;;   (generate-node-message :node-reply msg-orig-addr))
+	   ))
 	((and (= msg-type (getf *msg-types* :node-beacon)))
 	 (rcvlog (format nil "NODE BEACON"))
 	 (update-link-set message)
@@ -286,8 +292,8 @@ Returned packet will be unicasted."
 	when (dt:time>= (dt:now) (slot-value link-tuple 'l-time))
 	do (progn
 	     (remhash key *link-set*)
-	     (when (symmetric-link-p (l-neighbor-iface-addr link-tuple))
-	       (del-routing-table (l-neighbor-iface-addr link-tuple))))))
+	     ;; (when (symmetric-link-p (l-neighbor-iface-addr link-tuple))
+	       (del-routing-table (l-neighbor-iface-addr link-tuple)))))
 
 (defun start-timers ()
   "Setup and start timers."
