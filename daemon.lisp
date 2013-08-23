@@ -184,7 +184,7 @@
     (let* ((destination (msg-orig-addr msg-header))
 	   (next-hop (next-hop msg-header))
 	   (current-rt (gethash (message-hash destination) *routing-table*)))
-      (unless (or (null current-rt) (< (rt-entry-hop-count current-rt) (1+ msg-hop-count)))
+      (when (or (null current-rt) (> (rt-entry-hop-count current-rt) (1+ msg-hop-count)))
 	(setf (gethash (message-hash destination) *routing-table*)
 	      (make-rt-entry :destination (usocket:hbo-to-dotted-quad destination)
 			     :next-hop next-hop :hop-count (1+ msg-hop-count) :seq-num msg-seq-num))
