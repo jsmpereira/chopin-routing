@@ -174,8 +174,8 @@
   (add-route (usocket:hbo-to-dotted-quad destination) (usocket:hbo-to-dotted-quad gateway) iface metric))
 
 (defun next-hop (msg-header)
-  "Deternime next-hop. It's either 0 for direct links or `msg-orig-addr' for remote ones."
-  (cond ((= (msg-type msg-header) (getf *msg-types* :base-station-beacon)) (msg-orig-addr msg-header))
+  "Determine next-hop. It's either 0 for direct links or `msg-orig-addr' for remote ones."
+  (cond ((and (plusp (msg-hop-count msg-header)) (= (msg-type msg-header) (getf *msg-types* :base-station-beacon))) (msg-orig-addr msg-header))
 	(t 0)))
 
 (defun update-routing-table (msg-header)
